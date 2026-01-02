@@ -17,7 +17,7 @@
     "start": "concurrently -k \"npm:dev\" \"sh -c 'cd ../../services/core-go && go run main.go'\"",
     "build:main": "tsc -p electron/tsconfig.json",
     "build": "vite build",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build:main && npm run build && electron-builder"
   },
   "build": {
     "appId": "com.luma.desktop",
