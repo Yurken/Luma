@@ -1,45 +1,81 @@
-name: CI
+name: Build and Release
 
 on:
   push:
-  pull_request:
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 jobs:
-  frontend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/desktop
+  release:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --- Setup Environments ---
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: "18"
-      - run: npm ci
-      - run: npm run build
 
-  core-go:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/core-go
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - run: go test ./...
-      - run: go build ./...
 
-  ai-py:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/ai-py
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - run: python -c "import main"
+
+      # --- Build Core Service (Go) ---
+      - name: Build Go Core
+        working-directory: services/core-go
+        shell: bash
+        run: |
+          OUTPUT_NAME="luma-core"
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            OUTPUT_NAME="luma-core.exe"
+          fi
+          mkdir -p ../../apps/desktop/bin
+          go build -o ../../apps/desktop/bin/$OUTPUT_NAME main.go
+
+      # --- Build AI Service (Python) ---
+      - name: Build Python AI
+        working-directory: services/ai-py
+        shell: bash
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+          
+          # Build single file executable
+          pyinstaller --clean --onefile --name luma-ai main.py --distpath ../../apps/desktop/bin
+          
+          # Verify output
+          ls -l ../../apps/desktop/bin/
+
+      # --- Build Electron App ---
+      - name: Build Electron App
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm ci
+          npm run dist
+
+      # --- Upload Artifacts ---
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Luma-${{ matrix.os }}-${{ github.ref_name }}
+          path: |
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/*.exe
