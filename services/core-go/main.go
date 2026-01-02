@@ -38,7 +38,7 @@ func main() {
 		Addr:         ":" + port,
 		Handler:      handler.Router(),
 		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
+		WriteTimeout: 30 * time.Second,
 	}
 
 	logger.Info("core service listening", slog.String("addr", server.Addr))
