@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"luma/core/internal/ai"
 	"luma/core/internal/db"
+	"luma/core/internal/focus"
 	"luma/core/internal/gateway"
 	"luma/core/internal/models"
 )
@@ -22,21 +24,24 @@ import (
 const (
 	settingQuietHours         = "quiet_hours"
 	settingInterventionBudget = "intervention_budget"
+	settingFocusMonitor       = "focus_monitor_enabled"
 )
 
 var allowedSettings = map[string]bool{
 	settingQuietHours:         true,
 	settingInterventionBudget: true,
+	settingFocusMonitor:       true,
 }
 
 type Handler struct {
 	store  *db.Store
 	ai     *ai.Client
+	focus  *focus.Monitor
 	logger *slog.Logger
 }
 
-func NewHandler(store *db.Store, aiClient *ai.Client, logger *slog.Logger) *Handler {
-	return &Handler{store: store, ai: aiClient, logger: logger}
+func NewHandler(store *db.Store, aiClient *ai.Client, focusMonitor *focus.Monitor, logger *slog.Logger) *Handler {
+	return &Handler{store: store, ai: aiClient, focus: focusMonitor, logger: logger}
 }
 
 func (h *Handler) Router() chi.Router {
@@ -45,6 +50,8 @@ func (h *Handler) Router() chi.Router {
 	r.Post("/v1/decision", h.handleDecision)
 	r.Post("/v1/feedback", h.handleFeedback)
 	r.Get("/v1/logs", h.handleLogs)
+	r.Get("/v1/focus/current", h.handleFocusCurrent)
+	r.Get("/v1/focus/recent", h.handleFocusRecent)
 	r.Get("/v1/export", h.handleExport)
 	r.Get("/v1/settings", h.handleSettingsGet)
 	r.Post("/v1/settings", h.handleSettingsPost)
@@ -79,7 +86,7 @@ func (h *Handler) handleDecision(w http.ResponseWriter, r *http.Request) {
 		requestID = uuid.NewString()
 	}
 
-	if err := enrichSignals(h.store, &req.Context); err != nil {
+	if err := enrichSignals(h.store, h.focus, &req.Context); err != nil {
 		h.logger.Error("settings read failed", slog.String("request_id", requestID), slog.Any("error", err))
 		respondError(w, http.StatusInternalServerError, "settings error")
 		return
@@ -190,6 +197,40 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, logs)
 }
 
+func (h *Handler) handleFocusCurrent(w http.ResponseWriter, r *http.Request) {
+	if h.focus == nil || !h.focus.Enabled() {
+		respondJSON(w, http.StatusOK, models.FocusCurrent{})
+		return
+	}
+	current, ok, err := h.focus.Current()
+	if err != nil {
+		h.logger.Error("focus current failed", slog.Any("error", err))
+		respondError(w, http.StatusInternalServerError, "focus error")
+		return
+	}
+	if !ok {
+		respondJSON(w, http.StatusOK, models.FocusCurrent{})
+		return
+	}
+	respondJSON(w, http.StatusOK, current)
+}
+
+func (h *Handler) handleFocusRecent(w http.ResponseWriter, r *http.Request) {
+	limit := 200
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := parseInt(l); err == nil {
+			limit = parsed
+		}
+	}
+	events, err := h.store.ListFocusEvents(limit)
+	if err != nil {
+		h.logger.Error("focus recent failed", slog.Any("error", err))
+		respondError(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	respondJSON(w, http.StatusOK, events)
+}
+
 func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request) {
 	limit := 1000
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -263,6 +304,12 @@ func (h *Handler) handleSettingsPost(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("update setting failed", slog.Any("error", err))
 		respondError(w, http.StatusInternalServerError, "db error")
 		return
+	}
+	if req.Key == settingFocusMonitor && h.focus != nil {
+		enabled := req.Value == "true"
+		if err := h.focus.SetEnabled(enabled); err != nil && !errors.Is(err, focus.ErrUnsupported) {
+			h.logger.Error("focus toggle failed", slog.Any("error", err))
+		}
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -351,7 +398,7 @@ func validateFeedback(req models.FeedbackRequest) error {
 	return nil
 }
 
-func enrichSignals(store *db.Store, payload *models.Context) error {
+func enrichSignals(store *db.Store, focusMonitor *focus.Monitor, payload *models.Context) error {
 	payload.Signals["hour_of_day"] = strconv.Itoa(time.Now().Hour())
 	if _, ok := payload.Signals["session_minutes"]; !ok {
 		payload.Signals["session_minutes"] = "0"
@@ -373,6 +420,24 @@ func enrichSignals(store *db.Store, payload *models.Context) error {
 		budgetValue := normalizeBudget(budgetSetting)
 		if budgetValue != "" {
 			payload.Signals["intervention_budget"] = budgetValue
+		}
+	}
+
+	if focusMonitor != nil && focusMonitor.Enabled() {
+		current, ok, err := focusMonitor.Current()
+		if err != nil {
+			return nil
+		}
+		if ok {
+			if _, exists := payload.Signals["focus_app"]; !exists {
+				payload.Signals["focus_app"] = current.AppName
+			}
+			if _, exists := payload.Signals["focus_bundle_id"]; !exists {
+				payload.Signals["focus_bundle_id"] = current.BundleID
+			}
+			if _, exists := payload.Signals["focus_minutes"]; !exists {
+				payload.Signals["focus_minutes"] = fmt.Sprintf("%.1f", current.FocusMinutes)
+			}
 		}
 	}
 	return nil
@@ -405,6 +470,13 @@ func normalizeSettingValue(key, value string) (string, error) {
 			return trimmed, nil
 		}
 		return "", fmt.Errorf("invalid quiet_hours")
+	case settingFocusMonitor:
+		switch strings.ToLower(trimmed) {
+		case "true", "false":
+			return strings.ToLower(trimmed), nil
+		default:
+			return "", fmt.Errorf("invalid focus_monitor_enabled")
+		}
 	default:
 		return trimmed, nil
 	}

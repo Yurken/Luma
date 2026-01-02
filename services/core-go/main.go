@@ -4,10 +4,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"luma/core/internal/ai"
 	"luma/core/internal/db"
+	"luma/core/internal/focus"
 	"luma/core/internal/httpapi"
 )
 
@@ -25,7 +27,10 @@ func main() {
 	}
 
 	aiClient := ai.NewClient(aiURL)
-	handler := httpapi.NewHandler(store, aiClient, logger)
+	focusMonitor := focus.NewMonitor(store, logger, focusInterval())
+	focusMonitor.Start()
+
+	handler := httpapi.NewHandler(store, aiClient, focusMonitor, logger)
 
 	server := &http.Server{
 		Addr:         ":" + port,
@@ -46,4 +51,13 @@ func getenv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func focusInterval() time.Duration {
+	if raw := os.Getenv("FOCUS_POLL_MS"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			return time.Duration(parsed) * time.Millisecond
+		}
+	}
+	return time.Second
 }

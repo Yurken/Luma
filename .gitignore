@@ -9,6 +9,7 @@ apps/desktop/.vite/
 services/core-go/core-go
 services/core-go/*.exe
 services/core-go/*.test
+services/core-go/bin/
 
 # Python
 services/ai-py/.venv/

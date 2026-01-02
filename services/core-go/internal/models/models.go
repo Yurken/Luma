@@ -142,3 +142,20 @@ type SettingRequest struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
+
+type FocusEvent struct {
+	ID         int64  `json:"id"`
+	TsMs       int64  `json:"ts_ms"`
+	AppName    string `json:"app_name"`
+	BundleID   string `json:"bundle_id,omitempty"`
+	PID        int    `json:"pid,omitempty"`
+	DurationMs int64  `json:"duration_ms"`
+}
+
+type FocusCurrent struct {
+	TsMs         int64   `json:"ts_ms"`
+	AppName      string  `json:"app_name"`
+	BundleID     string  `json:"bundle_id,omitempty"`
+	PID          int     `json:"pid,omitempty"`
+	FocusMinutes float64 `json:"focus_minutes"`
+}

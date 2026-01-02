@@ -26,6 +26,7 @@ Luma is a local-first, desktop companion agent that decides when to gently inter
 - AI outputs only Action; system operations are blocked by a permission gateway.
 - All decisions/feedback are logged and auditable in SQLite + JSONL export.
 - Policy/model versions are explicit for rollback and offline evaluation.
+- Focus monitoring is local-only, opt-in, and stores only frontmost app metadata.
 
 ## Services & Ports
 - Desktop UI: Vite dev server `http://localhost:5173`
@@ -128,10 +129,25 @@ Returns all user settings.
 }
 ```
 Notes:
-- Supported keys: `quiet_hours`, `intervention_budget`.
+- Supported keys: `quiet_hours`, `intervention_budget`, `focus_monitor_enabled`.
 - `intervention_budget` accepts `low|medium|high` and is mapped to `1|2|3` in `signals`.
 - `quiet_hours` uses `HH:MM-HH:MM` (e.g., `23:30-08:00`).
+- `focus_monitor_enabled` accepts `true|false`.
 - Python formatting uses `ruff` (installed via `services/ai-py/requirements.txt`).
+
+### GET /v1/focus/current
+```json
+{
+  "ts_ms": 1710000000123,
+  "app_name": "Safari",
+  "bundle_id": "com.apple.Safari",
+  "pid": 12345,
+  "focus_minutes": 12.3
+}
+```
+
+### GET /v1/focus/recent?limit=200
+Returns the most recent focus events.
 
 ### GET /v1/export?limit=1000&since_ms=...
 Returns `application/x-ndjson` (JSONL) for offline replay.
@@ -148,10 +164,24 @@ Each line contains one decision record for offline evaluation/replay:
   - `event_logs` (request_id, context_json, raw_action_json, final_action_json, gateway_decision_json, policy_version, model_version, latency_ms, created_at_ms, user_feedback)
   - `feedback_logs` (request_id, feedback, created_at_ms)
   - `user_settings` (key, value, updated_at_ms)
+  - `focus_events` (ts_ms, app_name, bundle_id, pid, duration_ms)
 - Example query:
 ```
 sqlite3 ./data/luma.db "select request_id, policy_version, user_feedback, created_at_ms from event_logs order by created_at_ms desc limit 5;"
 ```
+
+## Focus Monitoring (macOS)
+- Runs locally and only captures frontmost app metadata (app name, bundle_id, pid).
+- No screenshots, no keyboard input, no window contents.
+- Window titles are not collected by default (reserved for future AX API support).
+- Disabled by default. Enable via `focus_monitor_enabled` setting.
+- Uses a local Swift helper at `cmd/focusd` (built on first run) and polls every 1s (configurable via `FOCUS_POLL_MS`).
+
+## Signals Injection
+When focus monitoring is enabled, `/v1/decision` auto-fills:
+- `focus_app`
+- `focus_bundle_id`
+- `focus_minutes`
 
 ## Safety & Extensibility
 - AI service only outputs Action; it never executes system operations.
@@ -178,6 +208,30 @@ curl -s http://127.0.0.1:8081/v1/feedback \
 Export:
 ```
 curl -s "http://127.0.0.1:8081/v1/export?limit=10&since_ms=0"
+```
+
+Focus current:
+```
+curl -s "http://127.0.0.1:8081/v1/focus/current"
+```
+
+Focus recent:
+```
+curl -s "http://127.0.0.1:8081/v1/focus/recent?limit=5"
+```
+
+Enable focus monitor:
+```
+curl -s http://127.0.0.1:8081/v1/settings \
+  -H "Content-Type: application/json" \
+  -d '{"key":"focus_monitor_enabled","value":"true"}'
+```
+
+Decision with focus signals:
+```
+curl -s http://127.0.0.1:8081/v1/decision \
+  -H "Content-Type: application/json" \
+  -d '{"context":{"user_text":"Need focus","timestamp":1710000000000,"mode":"LIGHT","signals":{},"history_summary":""}}'
 ```
 
 ## Project Structure

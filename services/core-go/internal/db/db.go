@@ -46,9 +46,19 @@ CREATE TABLE IF NOT EXISTS user_settings (
   updated_at_ms INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS focus_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts_ms INTEGER NOT NULL,
+  app_name TEXT NOT NULL,
+  bundle_id TEXT,
+  pid INTEGER,
+  duration_ms INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_event_logs_request_id ON event_logs (request_id);
 CREATE INDEX IF NOT EXISTS idx_event_logs_created_at_ms ON event_logs (created_at_ms);
 CREATE INDEX IF NOT EXISTS idx_feedback_logs_request_id ON feedback_logs (request_id);
+CREATE INDEX IF NOT EXISTS idx_focus_events_ts_ms ON focus_events (ts_ms);
 `
 
 type Store struct {
@@ -436,6 +446,81 @@ func (s *Store) GetSetting(key string) (string, bool, error) {
 		return "", false, fmt.Errorf("get setting: %w", err)
 	}
 	return value, true, nil
+}
+
+func (s *Store) InsertFocusEvent(event models.FocusEvent) (int64, error) {
+	result, err := s.db.Exec(
+		`INSERT INTO focus_events (ts_ms, app_name, bundle_id, pid, duration_ms)
+		 VALUES (?, ?, ?, ?, ?)`,
+		event.TsMs,
+		event.AppName,
+		event.BundleID,
+		event.PID,
+		event.DurationMs,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("insert focus event: %w", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("focus event id: %w", err)
+	}
+	return id, nil
+}
+
+func (s *Store) UpdateFocusDuration(id int64, durationMs int64) error {
+	_, err := s.db.Exec(
+		`UPDATE focus_events SET duration_ms = ? WHERE id = ?`,
+		durationMs,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("update focus duration: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) LatestFocusEvent() (models.FocusEvent, bool, error) {
+	row := s.db.QueryRow(
+		`SELECT id, ts_ms, app_name, COALESCE(bundle_id, ''), COALESCE(pid, 0), duration_ms
+		 FROM focus_events ORDER BY ts_ms DESC, id DESC LIMIT 1`,
+	)
+	var event models.FocusEvent
+	if err := row.Scan(&event.ID, &event.TsMs, &event.AppName, &event.BundleID, &event.PID, &event.DurationMs); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.FocusEvent{}, false, nil
+		}
+		return models.FocusEvent{}, false, fmt.Errorf("latest focus event: %w", err)
+	}
+	return event, true, nil
+}
+
+func (s *Store) ListFocusEvents(limit int) ([]models.FocusEvent, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.Query(
+		`SELECT id, ts_ms, app_name, COALESCE(bundle_id, ''), COALESCE(pid, 0), duration_ms
+		 FROM focus_events ORDER BY ts_ms DESC, id DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list focus events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []models.FocusEvent
+	for rows.Next() {
+		var event models.FocusEvent
+		if err := rows.Scan(&event.ID, &event.TsMs, &event.AppName, &event.BundleID, &event.PID, &event.DurationMs); err != nil {
+			return nil, fmt.Errorf("scan focus event: %w", err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("focus rows: %w", err)
+	}
+	return events, nil
 }
 
 func parseCreatedAt(createdAt string, createdAtMs int64) time.Time {

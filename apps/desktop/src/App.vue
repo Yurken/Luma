@@ -35,6 +35,14 @@ type DecisionResponse = {
   gateway_decision: GatewayDecision;
 };
 
+type FocusCurrent = {
+  ts_ms: number;
+  app_name: string;
+  bundle_id?: string;
+  pid?: number;
+  focus_minutes: number;
+};
+
 const modes: Mode[] = ["SILENT", "LIGHT", "ACTIVE"];
 const currentMode = ref<Mode>("LIGHT");
 const userText = ref("");
@@ -59,9 +67,23 @@ const settingsSaving = ref(false);
 const settingsError = ref("");
 const isSettingsWindow = ref(false);
 const ignoreMouseEvents = ref(false);
+const focusMonitorEnabled = ref(false);
+const focusCurrent = ref<FocusCurrent | null>(null);
+const focusError = ref("");
+let focusTimer: number | undefined;
 const interventionBudget = ref<"low" | "medium" | "high">("medium");
 const quietStart = ref("23:30");
 const quietEnd = ref("08:00");
+
+const focusMinutesText = computed(() => {
+  if (!focusMonitorEnabled.value) {
+    return "—";
+  }
+  if (!focusCurrent.value) {
+    return "0.0 分钟";
+  }
+  return `${focusCurrent.value.focus_minutes.toFixed(1)} 分钟`;
+});
 
 const dragging = ref(false);
 const dragStart = ref({ x: 0, y: 0, winX: 0, winY: 0 });
@@ -155,12 +177,20 @@ const loadSettings = async () => {
     if (map.intervention_budget === "low" || map.intervention_budget === "medium" || map.intervention_budget === "high") {
       interventionBudget.value = map.intervention_budget;
     }
+    if (map.focus_monitor_enabled === "true") {
+      focusMonitorEnabled.value = true;
+    } else if (map.focus_monitor_enabled === "false") {
+      focusMonitorEnabled.value = false;
+    }
     if (map.quiet_hours) {
       const parts = map.quiet_hours.split("-");
       if (parts.length === 2) {
         quietStart.value = parts[0].trim();
         quietEnd.value = parts[1].trim();
       }
+    }
+    if (!isSettingsWindow.value) {
+      await fetchFocusCurrent();
     }
   } catch (err) {
     settingsError.value = err instanceof Error ? err.message : "加载设置失败";
@@ -188,12 +218,53 @@ const saveSettings = async () => {
     await Promise.all([
       upsertSetting("intervention_budget", interventionBudget.value),
       upsertSetting("quiet_hours", quietHours),
+      upsertSetting("focus_monitor_enabled", focusMonitorEnabled.value ? "true" : "false"),
     ]);
+    if (!isSettingsWindow.value) {
+      await fetchFocusCurrent();
+    }
   } catch (err) {
     settingsError.value = err instanceof Error ? err.message : "保存设置失败";
   } finally {
     settingsSaving.value = false;
   }
+};
+
+const fetchFocusCurrent = async () => {
+  focusError.value = "";
+  if (!focusMonitorEnabled.value) {
+    focusCurrent.value = null;
+    return;
+  }
+  try {
+    const res = await fetch(`${apiBase}/v1/focus/current`);
+    if (!res.ok) {
+      throw new Error("加载专注状态失败");
+    }
+    const data = (await res.json()) as FocusCurrent;
+    if (data && typeof data.app_name === "string") {
+      focusCurrent.value = data.app_name ? data : null;
+    }
+  } catch (err) {
+    focusError.value = err instanceof Error ? err.message : "加载专注状态失败";
+  }
+};
+
+const setFocusMonitorEnabled = async (enabled: boolean) => {
+  focusError.value = "";
+  const previous = focusMonitorEnabled.value;
+  focusMonitorEnabled.value = enabled;
+  try {
+    await upsertSetting("focus_monitor_enabled", enabled ? "true" : "false");
+    await fetchFocusCurrent();
+  } catch (err) {
+    focusMonitorEnabled.value = previous;
+    focusError.value = err instanceof Error ? err.message : "保存设置失败";
+  }
+};
+
+const toggleFocusMonitor = () => {
+  setFocusMonitorEnabled(!focusMonitorEnabled.value);
 };
 
 const togglePanel = () => {
@@ -357,6 +428,10 @@ onMounted(() => {
     loadSettings();
   } else {
     setIgnoreMouse(true);
+    loadSettings();
+    focusTimer = window.setInterval(() => {
+      fetchFocusCurrent();
+    }, 2000);
   }
 });
 
@@ -364,6 +439,9 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", updatePanelAlign);
   window.removeEventListener("pointermove", handlePointerMove);
   window.removeEventListener("pointerdown", handlePointerMove);
+  if (focusTimer !== undefined) {
+    window.clearInterval(focusTimer);
+  }
 });
 
 watch(panelOpen, (open) => {
@@ -394,107 +472,142 @@ watch(panelOpen, (open) => {
       />
     </button>
 
-    <div
-      v-if="panelOpen || isSettingsWindow"
-      class="panel"
-      :data-align="panelAlign"
-    >
-      <div v-if="!isSettingsWindow">
-        <div class="header">
-          <div>
-            <h1>Luma 陪伴助手</h1>
-            <p>当前模式：{{ formattedMode }}</p>
+    <Transition name="panel">
+      <div
+        v-if="panelOpen || isSettingsWindow"
+        class="panel"
+        :data-align="panelAlign"
+      >
+        <div v-if="!isSettingsWindow">
+          <div class="header">
+            <div>
+              <h1>Luma 陪伴助手</h1>
+              <p>当前模式：{{ formattedMode }}</p>
+            </div>
+            <div class="mode">
+              <button
+                v-for="mode in modes"
+                :key="mode"
+                :class="{ active: mode === currentMode }"
+                @click="currentMode = mode"
+              >
+                {{ mode }}
+              </button>
+            </div>
           </div>
-          <div class="mode">
-            <button
-              v-for="mode in modes"
-              :key="mode"
-              :class="{ active: mode === currentMode }"
-              @click="currentMode = mode"
-            >
-              {{ mode }}
+
+          <textarea
+            v-model="userText"
+            placeholder="描述你当前的状态或任务..."
+          />
+
+          <div class="actions">
+            <button class="primary" :disabled="loading" @click="requestSuggestion">
+              {{ loading ? "请求中..." : "请求建议" }}
             </button>
+            <button class="secondary" @click="userText = ''">清空</button>
           </div>
-        </div>
 
-        <textarea
-          v-model="userText"
-          placeholder="描述你当前的状态或任务..."
-        />
-
-        <div class="actions">
-          <button class="primary" :disabled="loading" @click="requestSuggestion">
-            {{ loading ? "请求中..." : "请求建议" }}
-          </button>
-          <button class="secondary" @click="userText = ''">清空</button>
-        </div>
-
-        <div v-if="error" class="result">
-          <h3>请求失败</h3>
-          <p>{{ error }}</p>
-        </div>
-
-        <div v-if="result" class="result">
-          <h3>建议卡片</h3>
-          <p>{{ result.action.message }}</p>
-          <p>
-            类型：{{ result.action.action_type }} | 置信度：
-            {{ result.action.confidence }} | 风险：{{ result.action.risk_level }}
-          </p>
-          <div class="feedback">
-            <button class="secondary" @click="sendFeedback('LIKE')">赞同</button>
-            <button class="secondary" @click="sendFeedback('DISLIKE')">不赞同</button>
+          <div v-if="error" class="result">
+            <h3>请求失败</h3>
+            <p>{{ error }}</p>
           </div>
-        </div>
-      </div>
 
-      <div v-if="settingsOpen" class="settings">
-        <h3>设置</h3>
-        <p class="settings-note">右键打开菜单进入设置。</p>
-
-        <div v-if="settingsLoading" class="settings-note">正在加载设置...</div>
-        <div v-else class="settings-grid">
-          <div class="setting-row">
-            <label>介入频率</label>
-            <div class="segmented">
-              <button
-                :class="{ active: interventionBudget === 'low' }"
-                @click="interventionBudget = 'low'"
-              >
-                低
-              </button>
-              <button
-                :class="{ active: interventionBudget === 'medium' }"
-                @click="interventionBudget = 'medium'"
-              >
-                中
-              </button>
-              <button
-                :class="{ active: interventionBudget === 'high' }"
-                @click="interventionBudget = 'high'"
-              >
-                高
-              </button>
+          <div v-if="result" class="result">
+            <h3>建议卡片</h3>
+            <p>{{ result.action.message }}</p>
+            <p>
+              类型：{{ result.action.action_type }} | 置信度：
+              {{ result.action.confidence }} | 风险：{{ result.action.risk_level }}
+            </p>
+            <div class="feedback">
+              <button class="secondary" @click="sendFeedback('LIKE')">赞同</button>
+              <button class="secondary" @click="sendFeedback('DISLIKE')">不赞同</button>
             </div>
           </div>
 
-          <div class="setting-row">
-            <label>安静时段</label>
-            <div class="time-range">
-              <input type="time" v-model="quietStart" />
-              <span>至</span>
-              <input type="time" v-model="quietEnd" />
+          <div class="focus-card">
+            <div class="focus-header">
+              <div>
+                <h3>专注监控</h3>
+                <p class="focus-subtitle">{{ focusMonitorEnabled ? "监控开启" : "监控暂停" }}</p>
+              </div>
+              <button class="toggle" :class="{ active: focusMonitorEnabled }" @click="toggleFocusMonitor">
+                <span></span>
+              </button>
             </div>
+            <div class="focus-body">
+              <div class="focus-row">
+                <span>当前应用</span>
+                <strong>{{ focusMonitorEnabled ? (focusCurrent?.app_name || "暂无") : "未启用" }}</strong>
+              </div>
+              <div class="focus-row">
+                <span>专注时长</span>
+                <strong>{{ focusMinutesText }}</strong>
+              </div>
+            </div>
+            <p v-if="focusError" class="focus-error">{{ focusError }}</p>
           </div>
         </div>
 
-        <div class="settings-actions">
-          <button class="primary" :disabled="settingsSaving" @click="saveSettings">
-            {{ settingsSaving ? "保存中..." : "保存设置" }}
-          </button>
-          <span v-if="settingsError" class="settings-error">{{ settingsError }}</span>
+        <div v-if="settingsOpen" class="settings">
+          <h3>设置</h3>
+          <p class="settings-note">右键打开菜单进入设置。</p>
+
+          <div v-if="settingsLoading" class="settings-note">正在加载设置...</div>
+          <div v-else class="settings-grid">
+            <div class="setting-row">
+              <label>介入频率</label>
+              <div class="segmented">
+                <button
+                  :class="{ active: interventionBudget === 'low' }"
+                  @click="interventionBudget = 'low'"
+                >
+                  低
+                </button>
+                <button
+                  :class="{ active: interventionBudget === 'medium' }"
+                  @click="interventionBudget = 'medium'"
+                >
+                  中
+                </button>
+                <button
+                  :class="{ active: interventionBudget === 'high' }"
+                  @click="interventionBudget = 'high'"
+                >
+                  高
+                </button>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <label>专注监控</label>
+              <div class="toggle-row">
+                <button class="toggle" :class="{ active: focusMonitorEnabled }" @click="toggleFocusMonitor">
+                  <span></span>
+                </button>
+                <span class="settings-note">仅采集前台应用信息</span>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <label>安静时段</label>
+              <div class="time-range">
+                <input type="time" v-model="quietStart" />
+                <span>至</span>
+                <input type="time" v-model="quietEnd" />
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-actions">
+            <button class="primary" :disabled="settingsSaving" @click="saveSettings">
+              {{ settingsSaving ? "保存中..." : "保存设置" }}
+            </button>
+            <span v-if="settingsError" class="settings-error">{{ settingsError }}</span>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
