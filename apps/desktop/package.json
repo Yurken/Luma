@@ -2,6 +2,12 @@
   "name": "luma-desktop",
   "private": true,
   "version": "0.1.0",
+  "description": "Local-first desktop companion agent for focus and wellness",
+  "author": "Luma Team",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Yurken/Luma.git"
+  },
   "main": "dist-electron/main.js",
   "scripts": {
     "dev:renderer": "vite",
@@ -16,6 +22,7 @@
   "build": {
     "appId": "com.luma.desktop",
     "productName": "Luma",
+    "publish": null,
     "directories": {
       "output": "dist"
     },
