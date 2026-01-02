@@ -91,10 +91,11 @@ Current Context:
 - User Input: "{user_text}" (If empty, infer from screen context)
 
 Task:
-Analyze the context and decide on the best action.
-If the user is working on a productive task for a long time, maybe suggest a break.
-If the user is distracted (e.g. social media) during work hours, suggest getting back to work.
-If the user asks for help, provide it.
+Analyze the context and decide on the best action. Always prioritize the user's input text.
+If the user input is present and meaningful, respond to it directly with a helpful, concise reply.
+Do not suggest a break unless there is a clear signal of long focus time or fatigue.
+If the input is vague (e.g. "test"), ask a short clarifying question instead of generic advice.
+If the user asks for help, provide it. If the user is distracted during work hours, gently refocus.
 Consider the User Profile and Recent Memories to personalize your advice.
 
 Output Format (JSON only):
