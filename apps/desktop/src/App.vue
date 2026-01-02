@@ -57,6 +57,7 @@ const settingsOpen = ref(false);
 const settingsLoading = ref(false);
 const settingsSaving = ref(false);
 const settingsError = ref("");
+const isSettingsWindow = ref(false);
 const interventionBudget = ref<"low" | "medium" | "high">("medium");
 const quietStart = ref("23:30");
 const quietEnd = ref("08:00");
@@ -195,17 +196,13 @@ const saveSettings = async () => {
 };
 
 const togglePanel = () => {
+  if (isSettingsWindow.value) {
+    return;
+  }
   panelOpen.value = !panelOpen.value;
   if (!panelOpen.value) {
     settingsOpen.value = false;
   }
-};
-
-const openSettings = async () => {
-  panelOpen.value = true;
-  settingsOpen.value = true;
-  updatePanelAlign();
-  await loadSettings();
 };
 
 const startDrag = (event: PointerEvent) => {
@@ -329,6 +326,14 @@ const isDecisionResponse = (value: unknown): value is DecisionResponse => {
 
 onMounted(() => {
   window.addEventListener("resize", updatePanelAlign);
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("settings") === "1") {
+    isSettingsWindow.value = true;
+    panelOpen.value = true;
+    settingsOpen.value = true;
+    document.body.classList.add("settings-window");
+    loadSettings();
+  }
 });
 
 onBeforeUnmount(() => {
@@ -345,13 +350,13 @@ watch(panelOpen, (open) => {
 <template>
   <div class="floating-shell">
     <button
+      v-if="!isSettingsWindow"
       class="orb"
       title="Luma"
       @pointerdown="startDrag"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
-      @contextmenu.prevent="openSettings"
       ref="orbRef"
     >
       <img
@@ -363,57 +368,63 @@ watch(panelOpen, (open) => {
       />
     </button>
 
-    <div v-if="panelOpen" class="panel" :data-align="panelAlign">
-      <div class="header">
-        <div>
-          <h1>Luma 陪伴助手</h1>
-          <p>当前模式：{{ formattedMode }}</p>
+    <div
+      v-if="panelOpen || isSettingsWindow"
+      class="panel"
+      :data-align="panelAlign"
+    >
+      <div v-if="!isSettingsWindow">
+        <div class="header">
+          <div>
+            <h1>Luma 陪伴助手</h1>
+            <p>当前模式：{{ formattedMode }}</p>
+          </div>
+          <div class="mode">
+            <button
+              v-for="mode in modes"
+              :key="mode"
+              :class="{ active: mode === currentMode }"
+              @click="currentMode = mode"
+            >
+              {{ mode }}
+            </button>
+          </div>
         </div>
-        <div class="mode">
-          <button
-            v-for="mode in modes"
-            :key="mode"
-            :class="{ active: mode === currentMode }"
-            @click="currentMode = mode"
-          >
-            {{ mode }}
+
+        <textarea
+          v-model="userText"
+          placeholder="描述你当前的状态或任务..."
+        />
+
+        <div class="actions">
+          <button class="primary" :disabled="loading" @click="requestSuggestion">
+            {{ loading ? "请求中..." : "请求建议" }}
           </button>
+          <button class="secondary" @click="userText = ''">清空</button>
         </div>
-      </div>
 
-      <textarea
-        v-model="userText"
-        placeholder="描述你当前的状态或任务..."
-      />
+        <div v-if="error" class="result">
+          <h3>请求失败</h3>
+          <p>{{ error }}</p>
+        </div>
 
-      <div class="actions">
-        <button class="primary" :disabled="loading" @click="requestSuggestion">
-          {{ loading ? "请求中..." : "请求建议" }}
-        </button>
-        <button class="secondary" @click="userText = ''">清空</button>
-      </div>
-
-      <div v-if="error" class="result">
-        <h3>请求失败</h3>
-        <p>{{ error }}</p>
-      </div>
-
-      <div v-if="result" class="result">
-        <h3>建议卡片</h3>
-        <p>{{ result.action.message }}</p>
-        <p>
-          类型：{{ result.action.action_type }} | 置信度：
-          {{ result.action.confidence }} | 风险：{{ result.action.risk_level }}
-        </p>
-        <div class="feedback">
-          <button class="secondary" @click="sendFeedback('LIKE')">赞同</button>
-          <button class="secondary" @click="sendFeedback('DISLIKE')">不赞同</button>
+        <div v-if="result" class="result">
+          <h3>建议卡片</h3>
+          <p>{{ result.action.message }}</p>
+          <p>
+            类型：{{ result.action.action_type }} | 置信度：
+            {{ result.action.confidence }} | 风险：{{ result.action.risk_level }}
+          </p>
+          <div class="feedback">
+            <button class="secondary" @click="sendFeedback('LIKE')">赞同</button>
+            <button class="secondary" @click="sendFeedback('DISLIKE')">不赞同</button>
+          </div>
         </div>
       </div>
 
       <div v-if="settingsOpen" class="settings">
         <h3>设置</h3>
-        <p class="settings-note">右键悬浮球进入设置。</p>
+        <p class="settings-note">右键打开菜单进入设置。</p>
 
         <div v-if="settingsLoading" class="settings-note">正在加载设置...</div>
         <div v-else class="settings-grid">
