@@ -14,14 +14,14 @@ Luma 是一个本地优先（Local-first）的桌面陪伴 Agent，旨在通过�
 
 ```mermaid
 graph TD
-    User[用户] <--> UI[Electron + Vue (悬浮球/Toast)]
+    User[用户] <--> UI["Electron + Vue (悬浮球/Toast)"]
     UI <-->|HTTP| Go[Go Core Service]
     
     subgraph "Go Core Service"
         Handler[API Handler]
-        Gateway[智能网关 (预算/冷却)]
-        Memory[记忆服务 (Profile/Events)]
-        Focus[专注监控 (focusd)]
+        Gateway["智能网关 (预算/冷却)"]
+        Memory["记忆服务 (Profile/Events)"]
+        Focus["专注监控 (focusd)"]
     end
     
     Go <-->|SQL| DB[(SQLite luma.db)]
@@ -29,7 +29,7 @@ graph TD
     
     subgraph "Python AI Service"
         Policy[策略引擎]
-        LLM[Ollama (Llama3)]
+        LLM["Ollama (Llama3)"]
     end
     
     Focus -->|OS API| MacOS[macOS Window Server]
