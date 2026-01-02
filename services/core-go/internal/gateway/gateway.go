@@ -112,6 +112,16 @@ func (g *Gateway) replenishBudget() {
 	g.lastUpdate = now
 }
 
+// ClearCooldown resets the cooldown timer to allow immediate interaction
+func (g *Gateway) ClearCooldown() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// Set lastIntervention to a time in the past to bypass cooldown
+	g.lastIntervention = time.Now().Add(-time.Duration(g.config.CooldownSeconds+1) * time.Second)
+	g.logger.Info("gateway cooldown cleared, interaction enabled")
+}
+
 func calculateCost(action models.Action) float64 {
 	// Base cost by action type
 	// Can be enhanced to use action.Cost from AI if reliable

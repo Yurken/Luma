@@ -97,6 +97,12 @@ func (h *Handler) handleDecision(w http.ResponseWriter, r *http.Request) {
 		requestID = uuid.NewString()
 	}
 
+	// If user actively inputs text, clear cooldown to allow conversation
+	if req.Context.UserText != "" {
+		h.gateway.ClearCooldown()
+		h.logger.Info("user text detected, cooldown cleared for conversation")
+	}
+
 	if err := enrichSignals(h.store, h.focus, &req.Context); err != nil {
 		h.logger.Error("settings read failed", slog.String("request_id", requestID), slog.Any("error", err))
 		respondError(w, http.StatusInternalServerError, "settings error")
@@ -188,18 +194,106 @@ func (h *Handler) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.RecordFeedback(req.RequestID, string(req.Feedback)); err != nil {
+	feedbackValue := string(req.Feedback)
+	if req.FeedbackText != "" {
+		feedbackValue = string(req.Feedback) + ": " + req.FeedbackText
+	}
+
+	if err := h.store.RecordFeedback(req.RequestID, feedbackValue); err != nil {
 		h.logger.Error("record feedback failed", slog.String("request_id", req.RequestID), slog.Any("error", err))
 		respondError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	if err := h.ai.Feedback(req.RequestID, string(req.Feedback)); err != nil {
+	if err := h.ai.Feedback(req.RequestID, feedbackValue); err != nil {
 		h.logger.Error("forward feedback failed", slog.String("request_id", req.RequestID), slog.Any("error", err))
 	}
 
 	// Update Memory
-	if err := h.memory.ProcessFeedback(req.RequestID, string(req.Feedback)); err != nil {
+	if err := h.memory.ProcessFeedback(req.RequestID, feedbackValue); err != nil {
 		h.logger.Error("process feedback failed", slog.String("request_id", req.RequestID), slog.Any("error", err))
+	}
+
+	// Clear gateway cooldown to allow continued interaction after user feedback
+	h.gateway.ClearCooldown()
+
+	h.logger.Info("feedback recorded",
+		slog.String("request_id", req.RequestID),
+		slog.String("type", string(req.Feedback)),
+		slog.String("text", req.FeedbackText),
+	)
+
+	// If feedback has text, generate AI response for conversation
+	if req.FeedbackText != "" && req.Context.Mode != "" {
+		// Use feedback text as user input for new decision
+		req.Context.UserText = req.FeedbackText
+		if req.Context.Timestamp == 0 {
+			req.Context.Timestamp = time.Now().UnixMilli()
+		}
+		if req.Context.Signals == nil {
+			req.Context.Signals = map[string]string{}
+		}
+
+		// Enrich context
+		if err := enrichSignals(h.store, h.focus, &req.Context); err != nil {
+			h.logger.Warn("failed to enrich signals for reply", slog.Any("error", err))
+		}
+		req.Context.ProfileSummary = h.memory.GetProfileSummary()
+		req.Context.MemorySummary = h.memory.GetRecentEvents(5)
+
+		// Generate reply
+		newRequestID := uuid.NewString()
+		start := time.Now()
+		rawAction, policyVersion, modelVersion, err := h.ai.Decide(req.Context, newRequestID)
+		latency := time.Since(start).Milliseconds()
+
+		if err != nil {
+			h.logger.Error("failed to generate reply", slog.String("request_id", newRequestID), slog.Any("error", err))
+			respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			return
+		}
+
+		finalAction, gatewayDecision := h.gateway.Evaluate(req.Context, rawAction)
+		createdAt := time.Now()
+
+		resp := models.DecisionResponse{
+			RequestID:       newRequestID,
+			Context:         req.Context,
+			Action:          finalAction,
+			PolicyVersion:   policyVersion,
+			ModelVersion:    modelVersion,
+			LatencyMs:       latency,
+			CreatedAt:       createdAt,
+			CreatedAtMs:     createdAt.UnixMilli(),
+			GatewayDecision: gatewayDecision,
+		}
+
+		logEntry := models.DecisionLogEntry{
+			RequestID:       newRequestID,
+			Context:         req.Context,
+			RawAction:       rawAction,
+			FinalAction:     finalAction,
+			GatewayDecision: gatewayDecision,
+			PolicyVersion:   policyVersion,
+			ModelVersion:    modelVersion,
+			LatencyMs:       latency,
+			CreatedAt:       createdAt,
+			CreatedAtMs:     createdAt.UnixMilli(),
+		}
+
+		if err := h.store.InsertDecision(logEntry); err != nil {
+			h.logger.Error("insert reply decision failed", slog.String("request_id", newRequestID), slog.Any("error", err))
+		}
+
+		h.logger.Info("reply generated",
+			slog.String("reply_request_id", newRequestID),
+			slog.Int64("latency_ms", latency),
+		)
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "ok",
+			"reply":  resp,
+		})
+		return
 	}
 
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})

@@ -87,8 +87,10 @@ type DecisionResponse struct {
 }
 
 type FeedbackRequest struct {
-	RequestID string       `json:"request_id"`
-	Feedback  FeedbackType `json:"feedback"`
+	RequestID    string       `json:"request_id"`
+	Feedback     FeedbackType `json:"feedback"`
+	FeedbackText string       `json:"feedback_text,omitempty"`
+	Context      Context      `json:"context,omitempty"` // Context for generating reply
 }
 
 type DecisionLogEntry struct {

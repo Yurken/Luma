@@ -134,10 +134,48 @@ const handleFeedback = async (type: "LIKE" | "DISLIKE") => {
         feedback: type,
       }),
     });
-    // Close toast/panel after feedback
-    result.value = null; 
+    
+    // Close toast after feedback
+    result.value = null;
   } catch (e) {
     console.error("Feedback failed", e);
+  }
+};
+
+const handleSendMessage = async (text: string) => {
+  if (!text.trim()) return;
+  
+  loading.value = true;
+  error.value = "";
+  
+  try {
+    const payload = {
+      context: {
+        user_text: text,
+        timestamp: Date.now(),
+        mode: currentMode.value,
+        signals: {
+          hour_of_day: new Date().getHours().toString(),
+        },
+      },
+    };
+    
+    const res = await fetch(`${apiBase}/v1/decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error("Decision request failed");
+    }
+    
+    result.value = data as DecisionResponse;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "Unknown error";
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -328,6 +366,7 @@ onBeforeUnmount(() => {
         :action="result?.action || null"
         @close="result = null"
         @feedback="handleFeedback"
+        @sendMessage="handleSendMessage"
       />
 
       <Transition name="panel">

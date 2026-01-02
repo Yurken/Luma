@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 type Action = {
   action_type: string;
@@ -17,7 +17,40 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "close"): void;
   (e: "feedback", type: "LIKE" | "DISLIKE"): void;
+  (e: "sendMessage", text: string): void;
 }>();
+
+const showTextInput = ref(false);
+const feedbackText = ref("");
+
+// Watch for new action (reply) and keep text input open
+watch(() => props.action, (newAction, oldAction) => {
+  if (newAction && oldAction && newAction !== oldAction) {
+    // New reply received, clear input but keep it open
+    if (showTextInput.value) {
+      feedbackText.value = "";
+    }
+  }
+});
+
+const handleQuickFeedback = (type: "LIKE" | "DISLIKE") => {
+  emit("feedback", type);
+};
+
+const handleSendMessage = () => {
+  if (feedbackText.value.trim()) {
+    emit("sendMessage", feedbackText.value.trim());
+    feedbackText.value = "";
+    // Keep showTextInput open to continue conversation
+  }
+};
+
+const toggleTextInput = () => {
+  showTextInput.value = !showTextInput.value;
+  if (!showTextInput.value) {
+    feedbackText.value = "";
+  }
+};
 
 const actionColor = computed(() => {
   switch (props.action?.action_type) {
@@ -51,9 +84,29 @@ const actionLabel = computed(() => {
       <div class="toast-body">
         <p class="message">{{ action.message }}</p>
       </div>
+      <div v-if="showTextInput" class="toast-input">
+        <textarea 
+          v-model="feedbackText" 
+          placeholder="说说你的想法..."
+          rows="2"
+          @keydown.enter.ctrl="handleSendMessage"
+        ></textarea>
+        <button 
+          class="send-btn" 
+          @click="handleSendMessage"
+          :disabled="!feedbackText.trim()"
+        >
+          发送
+        </button>
+      </div>
       <div class="toast-footer">
-        <button class="feedback-btn like" @click="emit('feedback', 'LIKE')" title="有用">👍</button>
-        <button class="feedback-btn dislike" @click="emit('feedback', 'DISLIKE')" title="没用">👎</button>
+        <template v-if="!showTextInput">
+          <button class="feedback-btn like" @click="handleQuickFeedback('LIKE')" title="有用">👍</button>
+          <button class="feedback-btn dislike" @click="handleQuickFeedback('DISLIKE')" title="没用">👎</button>
+        </template>
+        <button class="feedback-btn text" @click="toggleTextInput" :title="showTextInput ? '取消输入' : '文字反馈'">
+          {{ showTextInput ? '✕' : '💬' }}
+        </button>
       </div>
     </div>
   </Transition>
@@ -102,6 +155,50 @@ const actionLabel = computed(() => {
   line-height: 1.5;
 }
 
+.toast-input {
+  padding: 0 12px 8px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.toast-input textarea {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+}
+
+.toast-input textarea:focus {
+  border-color: #2196f3;
+}
+
+.send-btn {
+  padding: 8px 16px;
+  background: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: #1976d2;
+}
+
+.send-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
 .toast-footer {
   padding: 8px 12px;
   background: #f9fafb;
@@ -121,6 +218,7 @@ const actionLabel = computed(() => {
   transition: background 0.2s;
 }
 .feedback-btn:hover { background: #e0e0e0; }
+.feedback-btn.text { font-size: 16px; }
 
 /* Transitions */
 .slide-fade-enter-active,
