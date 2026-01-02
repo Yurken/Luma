@@ -70,12 +70,16 @@ jobs:
           npm ci
           npm run dist
 
-      # --- Upload Artifacts ---
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      # --- Upload to Release ---
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
         with:
-          name: Luma-${{ matrix.os }}-${{ github.ref_name }}
-          path: |
+          files: |
             apps/desktop/dist/*.dmg
             apps/desktop/dist/*.zip
             apps/desktop/dist/*.exe
+            apps/desktop/dist/*.AppImage
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
