@@ -157,5 +157,6 @@ type FocusCurrent struct {
 	AppName      string  `json:"app_name"`
 	BundleID     string  `json:"bundle_id,omitempty"`
 	PID          int     `json:"pid,omitempty"`
+	WindowTitle  string  `json:"window_title,omitempty"`
 	FocusMinutes float64 `json:"focus_minutes"`
 }

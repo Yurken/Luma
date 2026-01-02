@@ -1,10 +1,12 @@
 from policy.base import Policy
 from policy.rule_v0 import RuleV0Policy
+from policy.ollama import OllamaPolicy
 
 _DEFAULT_POLICY = RuleV0Policy()
 
 _POLICIES = {
     "rule_v0": _DEFAULT_POLICY,
+    "ollama": OllamaPolicy(),
 }
 
 

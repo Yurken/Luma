@@ -498,7 +498,7 @@ watch(panelOpen, (open) => {
 
           <textarea
             v-model="userText"
-            placeholder="描述你当前的状态或任务..."
+            placeholder="描述你的状态，或留空让 AI 自动分析屏幕活动..."
           />
 
           <div class="actions">

@@ -18,7 +18,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("luma-ai")
 
-policy_name = os.getenv("LUMA_POLICY", "rule_v0")
+policy_name = os.getenv("LUMA_POLICY", "ollama")
 policy = get_policy(policy_name)
 
 

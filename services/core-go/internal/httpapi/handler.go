@@ -435,6 +435,9 @@ func enrichSignals(store *db.Store, focusMonitor *focus.Monitor, payload *models
 			if _, exists := payload.Signals["focus_bundle_id"]; !exists {
 				payload.Signals["focus_bundle_id"] = current.BundleID
 			}
+			if _, exists := payload.Signals["focus_window_title"]; !exists {
+				payload.Signals["focus_window_title"] = current.WindowTitle
+			}
 			if _, exists := payload.Signals["focus_minutes"]; !exists {
 				payload.Signals["focus_minutes"] = fmt.Sprintf("%.1f", current.FocusMinutes)
 			}
