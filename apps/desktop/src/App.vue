@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 type Mode = "SILENT" | "LIGHT" | "ACTIVE";
 
@@ -45,6 +45,11 @@ const formattedMode = computed(() => {
 const apiBase = "http://127.0.0.1:8081";
 const panelOpen = ref(false);
 const settingsOpen = ref(false);
+const dragging = ref(false);
+const dragStart = ref({ x: 0, y: 0, winX: 0, winY: 0 });
+const dragMoved = ref(false);
+const orbRef = ref<HTMLElement | null>(null);
+const panelAlign = ref<"left" | "right">("right");
 
 const requestSuggestion = async () => {
   error.value = "";
@@ -103,7 +108,74 @@ const togglePanel = () => {
 const openSettings = () => {
   panelOpen.value = true;
   settingsOpen.value = true;
+  updatePanelAlign();
 };
+
+const startDrag = (event: PointerEvent) => {
+  if (event.button !== 0) {
+    return;
+  }
+  orbRef.value?.setPointerCapture(event.pointerId);
+  dragging.value = true;
+  dragMoved.value = false;
+  dragStart.value = {
+    x: event.screenX,
+    y: event.screenY,
+    winX: window.screenX,
+    winY: window.screenY,
+  };
+};
+
+const onPointerMove = (event: PointerEvent) => {
+  if (!dragging.value) {
+    return;
+  }
+  const dx = event.screenX - dragStart.value.x;
+  const dy = event.screenY - dragStart.value.y;
+  if (Math.abs(dx) + Math.abs(dy) > 3) {
+    dragMoved.value = true;
+  }
+  // window.moveTo(dragStart.value.winX + dx, dragStart.value.winY + dy);
+  if ((window as any).luma?.moveWindow) {
+    (window as any).luma.moveWindow(dragStart.value.winX + dx, dragStart.value.winY + dy);
+  }
+};
+
+const onPointerUp = (event: PointerEvent) => {
+  if (!dragging.value) {
+    return;
+  }
+  dragging.value = false;
+  orbRef.value?.releasePointerCapture(event.pointerId);
+  if (!dragMoved.value) {
+    togglePanel();
+    updatePanelAlign();
+  }
+};
+
+const updatePanelAlign = () => {
+  const orb = orbRef.value;
+  if (!orb) {
+    return;
+  }
+  const rect = orb.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  panelAlign.value = centerX < window.innerWidth / 2 ? "left" : "right";
+};
+
+onMounted(() => {
+  window.addEventListener("resize", updatePanelAlign);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", updatePanelAlign);
+});
+
+watch(panelOpen, (open) => {
+  if (open) {
+    updatePanelAlign();
+  }
+});
 </script>
 
 <template>
@@ -111,13 +183,23 @@ const openSettings = () => {
     <button
       class="orb"
       title="Luma"
-      @click="togglePanel"
+      @pointerdown="startDrag"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerUp"
       @contextmenu.prevent="openSettings"
+      ref="orbRef"
     >
-      L
+      <img 
+        class="orb-avatar" 
+        src="/assets/robot.svg" 
+        alt="Luma bot" 
+        draggable="false" 
+        style="user-select: none; -webkit-user-drag: none;"
+      />
     </button>
 
-    <div v-if="panelOpen" class="panel">
+    <div v-if="panelOpen" class="panel" :data-align="panelAlign">
       <div class="header">
         <div>
           <h1>Luma 陪伴助手</h1>

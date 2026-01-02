@@ -37,21 +37,43 @@ body {
   height: 64px;
   border-radius: 50%;
   border: none;
-  background: radial-gradient(circle at 30% 30%, #fef3c7, #f97316);
+  background: transparent;
   color: #111827;
   font-size: 22px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 12px 20px rgba(17, 24, 39, 0.25);
+  box-shadow: 0 12px 20px rgba(17, 24, 39, 0.18);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.orb-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 .panel {
+  position: absolute;
+  bottom: 80px;
   width: 320px;
   background: #ffffffee;
   border: 1px solid #e5e7eb;
   border-radius: 18px;
   padding: 20px;
   box-shadow: 0 20px 40px rgba(17, 24, 39, 0.12);
+}
+
+.panel[data-align="left"] {
+  left: 0;
+}
+
+.panel[data-align="right"] {
+  right: 0;
 }
 
 .header {

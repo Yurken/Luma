@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import path from "path";
 
 const DEV_SERVER_URL = "http://localhost:5173";
@@ -22,6 +22,13 @@ const createWindow = () => {
 
 app.whenReady().then(() => {
   createWindow();
+
+  ipcMain.handle("window-move", (event, { x, y }) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      win.setPosition(Math.round(x), Math.round(y));
+    }
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
