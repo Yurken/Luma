@@ -108,20 +108,38 @@ func (s *Store) DB() *sql.DB {
 }
 
 func applyMigrations(db *sql.DB) error {
-	columns := []string{
-		"raw_action_json TEXT",
-		"final_action_json TEXT",
-		"gateway_decision_json TEXT",
-		"model_version TEXT",
-		"created_at_ms INTEGER",
+	// Check if this is a fresh database by checking if event_logs table is empty
+	var tableExists int
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='event_logs'").Scan(&tableExists)
+	if err != nil || tableExists == 0 {
+		// Fresh database, no migration needed
+		return nil
 	}
-	for _, column := range columns {
-		if err := addColumnIfMissing(db, "event_logs", column); err != nil {
+
+	// Check if migration is needed (old schema without created_at_ms)
+	var hasColumn int
+	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('event_logs') WHERE name='created_at_ms'").Scan(&hasColumn)
+	if err != nil {
+		return fmt.Errorf("check column existence: %w", err)
+	}
+
+	if hasColumn == 0 {
+		// Old schema detected, apply migrations
+		columns := []string{
+			"raw_action_json TEXT",
+			"final_action_json TEXT",
+			"gateway_decision_json TEXT",
+			"model_version TEXT",
+			"created_at_ms INTEGER",
+		}
+		for _, column := range columns {
+			if err := addColumnIfMissing(db, "event_logs", column); err != nil {
+				return err
+			}
+		}
+		if err := backfillEventLogs(db); err != nil {
 			return err
 		}
-	}
-	if err := backfillEventLogs(db); err != nil {
-		return err
 	}
 	return nil
 }

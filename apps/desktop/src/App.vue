@@ -235,7 +235,8 @@ onMounted(() => {
     document.body.classList.add("settings-window");
     loadSettings();
   } else {
-    setIgnoreMouse(true);
+    // Initially disable mouse ignore so floating ball is clickable
+    setIgnoreMouse(false);
     loadSettings();
     focusTimer = window.setInterval(fetchFocusCurrent, 2000);
   }
