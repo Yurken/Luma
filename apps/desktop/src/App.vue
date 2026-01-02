@@ -58,6 +58,7 @@ const settingsLoading = ref(false);
 const settingsSaving = ref(false);
 const settingsError = ref("");
 const isSettingsWindow = ref(false);
+const ignoreMouseEvents = ref(false);
 const interventionBudget = ref<"low" | "medium" | "high">("medium");
 const quietStart = ref("23:30");
 const quietEnd = ref("08:00");
@@ -256,6 +257,25 @@ const updatePanelAlign = () => {
   panelAlign.value = centerX < window.innerWidth / 2 ? "left" : "right";
 };
 
+const setIgnoreMouse = (ignore: boolean) => {
+  if (ignoreMouseEvents.value === ignore) {
+    return;
+  }
+  ignoreMouseEvents.value = ignore;
+  if ((window as any).luma?.setIgnoreMouseEvents) {
+    (window as any).luma.setIgnoreMouseEvents(ignore);
+  }
+};
+
+const handlePointerMove = (event: PointerEvent) => {
+  if (isSettingsWindow.value) {
+    return;
+  }
+  const target = document.elementFromPoint(event.clientX, event.clientY);
+  const isInteractive = !!target?.closest(".orb, .panel");
+  setIgnoreMouse(!isInteractive);
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -326,6 +346,8 @@ const isDecisionResponse = (value: unknown): value is DecisionResponse => {
 
 onMounted(() => {
   window.addEventListener("resize", updatePanelAlign);
+  window.addEventListener("pointermove", handlePointerMove);
+  window.addEventListener("pointerdown", handlePointerMove);
   const params = new URLSearchParams(window.location.search);
   if (params.get("settings") === "1") {
     isSettingsWindow.value = true;
@@ -333,11 +355,15 @@ onMounted(() => {
     settingsOpen.value = true;
     document.body.classList.add("settings-window");
     loadSettings();
+  } else {
+    setIgnoreMouse(true);
   }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", updatePanelAlign);
+  window.removeEventListener("pointermove", handlePointerMove);
+  window.removeEventListener("pointerdown", handlePointerMove);
 });
 
 watch(panelOpen, (open) => {

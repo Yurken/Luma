@@ -22,6 +22,7 @@ const createWindow = () => {
   });
 
   win.loadURL(DEV_SERVER_URL);
+  win.setIgnoreMouseEvents(true, { forward: true });
 
   attachContextMenu(win);
   return win;
@@ -75,6 +76,18 @@ app.whenReady().then(() => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) {
       win.setPosition(Math.round(x), Math.round(y));
+    }
+  });
+
+  ipcMain.handle("window-ignore-mouse", (event, { ignore }) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) {
+      return;
+    }
+    if (ignore) {
+      win.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      win.setIgnoreMouseEvents(false);
     }
   });
 
