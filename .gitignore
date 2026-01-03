@@ -25,3 +25,4 @@ services/ai-py/logs/
 
 # OS
 .DS_Store
+__pycache__/
