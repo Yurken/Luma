@@ -15,6 +15,7 @@ import (
 	"luma/core/internal/models"
 )
 
+// TODO: Add tables for implicit feedback events, daily/hourly budgets, and focus state snapshots.
 const schema = `
 CREATE TABLE IF NOT EXISTS event_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -539,6 +540,7 @@ func (s *Store) ListFocusEvents(limit int) ([]models.FocusEvent, error) {
 	if limit <= 0 {
 		limit = 200
 	}
+	// TODO: Add queries for app-switch counts and rolling-window focus metrics.
 	rows, err := s.db.Query(
 		`SELECT id, ts_ms, app_name, COALESCE(bundle_id, ''), COALESCE(pid, 0), duration_ms
 		 FROM focus_events ORDER BY ts_ms DESC, id DESC LIMIT ?`,

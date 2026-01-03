@@ -38,6 +38,8 @@ var allowedSettings = map[string]bool{
 	settingOllamaModel:        true,
 }
 
+// TODO: Add settings for agent_enabled, per-mode budgets, daily/hourly caps, and rule-only mode.
+
 type Handler struct {
 	store   *db.Store
 	ai      *ai.Client
@@ -65,6 +67,7 @@ func (h *Handler) Router() chi.Router {
 	r.Get("/v1/ollama/models", h.handleOllamaModels)
 	r.Get("/v1/settings", h.handleSettingsGet)
 	r.Post("/v1/settings", h.handleSettingsPost)
+	// TODO: Add endpoints for profile summary, learning explanations, and state history.
 	return r
 }
 
@@ -96,6 +99,8 @@ func (h *Handler) handleDecision(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// TODO: If agent is disabled or within quiet hours, return DO_NOT_DISTURB without calling AI.
+	// TODO: For auto-suggestions (empty user_text), enforce max-1-per-window and budget checks pre-AI.
 
 	requestID := req.RequestID
 	if requestID == "" {
@@ -209,6 +214,7 @@ func (h *Handler) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "db error")
 		return
 	}
+	// TODO: Accept implicit feedback types (IGNORED/CLOSED/OPEN_PANEL) and persist them.
 	if err := h.ai.Feedback(req.RequestID, feedbackValue); err != nil {
 		h.logger.Error("forward feedback failed", slog.String("request_id", req.RequestID), slog.Any("error", err))
 	}
@@ -311,6 +317,7 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
+	// TODO: Add time-range filters and aggregated history for UI timelines.
 	logs, err := h.store.ListLogs(limit)
 	if err != nil {
 		h.logger.Error("list logs failed", slog.Any("error", err))
@@ -602,6 +609,7 @@ func enrichSignals(store *db.Store, focusMonitor *focus.Monitor, payload *models
 	if _, ok := payload.Signals["session_minutes"]; !ok {
 		payload.Signals["session_minutes"] = "0"
 	}
+	// TODO: Compute app switch counts in a rolling window and derive rule-based focus state.
 
 	quietHours, ok, err := store.GetSetting(settingQuietHours)
 	if err != nil {

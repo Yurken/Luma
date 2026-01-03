@@ -148,6 +148,8 @@ func (m *Monitor) handleSnapshot(snapshot FocusSnapshot) {
 	last := m.last
 	hasLast := m.hasLast
 	m.mu.Unlock()
+	// TODO: Track app switch counts in a rolling window for "distracted" state.
+	// TODO: Detect "no progress" using prolonged same app/title without meaningful changes.
 
 	if hasLast && sameApp(snapshot, last) {
 		return

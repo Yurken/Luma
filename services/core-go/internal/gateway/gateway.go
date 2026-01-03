@@ -19,6 +19,8 @@ type Config struct {
 	CooldownSeconds float64
 }
 
+// TODO: Add per-mode budgets, daily/hourly caps, and user-configurable cooldowns.
+
 type Gateway struct {
 	mu               sync.Mutex
 	logger           *slog.Logger
@@ -35,6 +37,7 @@ func New(logger *slog.Logger) *Gateway {
 		RecoveryRate:    0.5, // Recover 1 point every 2 mins
 		CooldownSeconds: 300, // 5 minutes cooldown
 	}
+	// TODO: Load budget config from settings and persist per-day counters in storage.
 
 	return &Gateway{
 		logger:        logger,

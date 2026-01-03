@@ -23,6 +23,7 @@ class OllamaPolicy(Policy):
             override_model = context.signals.get("ollama_model", "").strip()
             if override_model:
                 model = override_model
+        # TODO: Add a rule-based pre-check to skip model calls when budgets/cooldowns are exhausted.
         
         try:
             logger.info(f"🤖 Calling Ollama model={model}")
@@ -70,6 +71,10 @@ class OllamaPolicy(Policy):
         focus_minutes = context.signals.get("focus_minutes", "0")
         user_text = context.user_text
         mode = context.mode
+        # TODO: Restrict prompt to allowed signals only; avoid "screen context" inference.
+        # TODO: Ask for explicit "reason" and "state" fields for explainability in UI.
+        # TODO: Enforce non-judgmental language and low-frequency intervention constraints.
+        # TODO: Add optional late-night companionship and long-term reflection behaviors.
         
         profile_section = ""
         if context.profile_summary:

@@ -40,6 +40,8 @@ func main() {
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
+	// TODO: Add health/uptime endpoint and graceful shutdown to support 24h+ runtime.
+	// TODO: Add watchdog/auto-restart integration (launchd/systemd) for long-running reliability.
 
 	logger.Info("core service listening", slog.String("addr", server.Addr))
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -21,6 +21,8 @@ const createWindow = () => {
       webSecurity: false, // 允许跨域请求
     },
   });
+  // TODO: Add hide/show controls (tray/menu/shortcut) for "hide without uninstall".
+  // TODO: Prevent focus stealing when showing UI (e.g., setFocusable/alwaysOnTop strategy).
 
   win.loadURL(DEV_SERVER_URL);
   win.setIgnoreMouseEvents(true, { forward: true });

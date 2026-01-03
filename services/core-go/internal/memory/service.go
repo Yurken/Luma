@@ -98,6 +98,9 @@ func (s *Service) SetProfile(key, value string, confidence float64) error {
 
 // ProcessFeedback analyzes user feedback and updates memory
 func (s *Service) ProcessFeedback(requestID, feedback string) error {
+	// TODO: Incorporate implicit feedback signals and decay profiles over time.
+	// TODO: Add user-controlled reset to clear learned preferences and memory.
+	// TODO: Learn preferred frequency, time-of-day tolerance, and suggestion-type acceptance.
 	// 1. Get the original action from event_logs
 	var finalActionJSON string
 	err := s.db.QueryRow("SELECT final_action_json FROM event_logs WHERE request_id = ?", requestID).Scan(&finalActionJSON)

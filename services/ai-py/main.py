@@ -20,6 +20,7 @@ logger = logging.getLogger("luma-ai")
 
 policy_name = os.getenv("LUMA_POLICY", "ollama")
 policy = get_policy(policy_name)
+# TODO: Support rule-only policy and a local "agent disabled" switch from core.
 
 
 @app.post("/ai/decide", response_model=DecideResponse)

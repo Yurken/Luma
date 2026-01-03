@@ -51,8 +51,10 @@ type OllamaModelsResponse = {
 
 const modes: Mode[] = ["SILENT", "LIGHT", "ACTIVE"];
 const currentMode = ref<Mode>("LIGHT");
+// TODO: Add one-click agent disable toggle and per-mode budgets in settings UI.
 const userText = ref("");
 const result = ref<DecisionResponse | null>(null);
+// TODO: Display gateway_decision and action reasons for transparency.
 const loading = ref(false);
 const error = ref("");
 
@@ -71,12 +73,14 @@ const settingsOpen = ref(false);
 const settingsLoading = ref(false);
 const settingsSaving = ref(false);
 const settingsError = ref("");
+// TODO: Add visible status text derived from rule-based focus state machine.
 const isSettingsWindow = ref(false);
 const ignoreMouseEvents = ref(true);
 const focusMonitorEnabled = ref(false);
 const focusCurrent = ref<FocusCurrent | null>(null);
 const focusError = ref("");
 let focusTimer: number | undefined;
+// TODO: Add history view using /v1/logs and /v1/focus/recent endpoints.
 const interventionBudget = ref<"low" | "medium" | "high">("medium");
 const quietStart = ref("23:30");
 const quietEnd = ref("08:00");
@@ -84,6 +88,7 @@ const ollamaModel = ref("llama3.1:8b");
 const ollamaModels = ref<string[]>([]);
 const modelLoadError = ref("");
 const showModelDropdown = ref(false);
+// TODO: Surface learned preferences and "why fewer/more prompts" explanations.
 
 const defaultModels = ["llama3.1:8b", "qwen3:14b", "qwen3:30b", "gemma3:12b"];
 const modelOptions = computed(() => {
@@ -103,6 +108,7 @@ const focusMinutesText = computed(() => {
 const requestSuggestion = async () => {
   error.value = "";
   loading.value = true;
+  // TODO: Attach derived focus state + app switch counts for explainable prompts.
   const payload = {
     context: {
       user_text: userText.value,
@@ -169,6 +175,7 @@ const requestSuggestion = async () => {
 
 const handleFeedback = async (type: "LIKE" | "DISLIKE") => {
   if (!result.value?.request_id) return;
+  // TODO: Record implicit feedback when toast is closed/ignored without response.
   
   try {
     await fetch(`${apiBase}/v1/feedback`, {
@@ -269,6 +276,7 @@ const loadSettings = async () => {
             }
         }
     }
+    // TODO: Load agent_enabled and per-mode budget settings.
     if (!isSettingsWindow.value) await fetchFocusCurrent();
   } catch (err) {
     settingsError.value = err instanceof Error ? err.message : "加载设置失败";
@@ -327,7 +335,8 @@ const saveSettings = async () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: "ollama_model", value: trimmedModel })
     });
-    // ... save others ...
+    // TODO: Save quiet hours, focus monitor toggle, agent_enabled, and per-mode budgets.
+    // TODO: Add "reset learning" + "rule-only mode" actions in settings.
   } finally {
     settingsSaving.value = false;
   }
@@ -349,16 +358,18 @@ const fetchFocusCurrent = async () => {
 
 const toggleFocusMonitor = () => {
     focusMonitorEnabled.value = !focusMonitorEnabled.value;
-    // In real app, save setting immediately
+    // TODO: Persist focus monitor setting to backend.
 };
 
 const togglePanel = () => {
   if (isSettingsWindow.value) return;
+  // TODO: Add hide/show for floating orb without quitting the app.
   panelOpen.value = !panelOpen.value;
 };
 
 const requestAutoSuggestion = async () => {
   if (loading.value) return;
+  // TODO: Move auto-suggestion to a low-frequency scheduler with budget/cooldown checks.
   
   // 立即打开panel显示加载状态
   panelOpen.value = true;
@@ -430,6 +441,7 @@ onMounted(() => {
   window.addEventListener("mousemove", handlePointerMove);
   window.addEventListener("mousedown", handlePointerMove);
   window.addEventListener("click", handleClickOutside);
+  // TODO: Record "panel opened" as an implicit feedback signal.
   const params = new URLSearchParams(window.location.search);
   if (params.get("settings") === "1") {
     isSettingsWindow.value = true;

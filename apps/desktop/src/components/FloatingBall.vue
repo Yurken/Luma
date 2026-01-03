@@ -20,6 +20,7 @@ const dragStart = ref({ x: 0, y: 0, winX: 0, winY: 0 });
 const handleMouseDown = (e: MouseEvent) => {
   if (e.button !== 0) return; // Only left click for drag
   e.preventDefault();
+  // TODO: Add edge-snap + optional auto-hide for non-intrusive presence.
   
   dragging.value = true;
   dragMoved.value = false;

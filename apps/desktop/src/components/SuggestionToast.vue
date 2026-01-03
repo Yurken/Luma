@@ -19,6 +19,7 @@ const emit = defineEmits<{
   (e: "feedback", type: "LIKE" | "DISLIKE"): void;
   (e: "sendMessage", text: string): void;
 }>();
+// TODO: Emit implicit feedback events (closed/ignored/opened panel) for learning.
 
 const showTextInput = ref(false);
 const feedbackText = ref("");
@@ -72,6 +73,7 @@ const actionLabel = computed(() => {
     default: return "建议";
   }
 });
+// TODO: Show "why" explanation when Action includes a reason field.
 </script>
 
 <template>

@@ -39,6 +39,7 @@ class Action(BaseModel):
     confidence: float = Field(ge=0, le=1)
     cost: float
     risk_level: RiskLevel
+    # TODO: Add optional reason/explanation fields for transparency.
 
 
 class DecideRequest(BaseModel):

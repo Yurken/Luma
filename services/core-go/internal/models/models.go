@@ -53,6 +53,7 @@ type Context struct {
 	HistorySummary string            `json:"history_summary"`
 	ProfileSummary string            `json:"profile_summary"`
 	MemorySummary  string            `json:"memory_summary"`
+	// TODO: Add derived focus state and app-switch counters for rule-based state machine + explainability.
 }
 
 type Action struct {
@@ -61,6 +62,7 @@ type Action struct {
 	Confidence float64    `json:"confidence"`
 	Cost       float64    `json:"cost"`
 	RiskLevel  RiskLevel  `json:"risk_level"`
+	// TODO: Add optional explanation/reason field for "why this suggestion" in UI.
 }
 
 type DecisionRequest struct {
@@ -154,6 +156,7 @@ type FocusEvent struct {
 	BundleID   string `json:"bundle_id,omitempty"`
 	PID        int    `json:"pid,omitempty"`
 	DurationMs int64  `json:"duration_ms"`
+	// TODO: Persist window_title to support "no progress" detection and explanations.
 }
 
 type FocusCurrent struct {
