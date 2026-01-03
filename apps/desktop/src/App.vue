@@ -873,7 +873,8 @@ const handlePointerMove = (event: MouseEvent) => {
   const localX = withinViewport ? event.clientX : event.screenX - window.screenX;
   const localY = withinViewport ? event.clientY : event.screenY - window.screenY;
   const target = document.elementFromPoint(localX, localY);
-  const isInteractive = !!target?.closest(".orb, .widget-panel, .toast-card");
+  // 检查所有可能的交互元素：悬浮球、面板、Toast（包括旧的和新的类名）
+  const isInteractive = !!target?.closest(".orb, .widget-panel, .toast-card, .toast-capsule");
   setIgnoreMouse(!isInteractive);
 };
 
@@ -1226,8 +1227,34 @@ onBeforeUnmount(() => {
 
 <style>
 /* Global Reset */
-* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: transparent; overflow: hidden; }
+* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+body { 
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
+  background: transparent; 
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 隐藏滚动条 */
+::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* 允许输入框和可复制文本选择 */
+textarea, input {
+  user-select: text;
+  -webkit-user-select: text;
+}
 
 .app-container {
   width: 100vw;
@@ -1236,6 +1263,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helve
   justify-content: flex-end;
   align-items: flex-start;
   padding: 10px;
+  background: transparent;
 }
 
 .widget-container {
@@ -1247,25 +1275,53 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helve
   align-items: flex-end;
   gap: 10px;
   z-index: 1000;
+  background: transparent;
 }
 
 .widget-panel {
   position: static;
-  width: 300px;
-  background: white;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  width: 320px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.15),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.6);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
 }
 
-.header { display: flex; justify-content: space-between; align-items: center; }
-.header h1 { font-size: 16px; font-weight: 600; }
-.header-title { display: flex; flex-direction: column; gap: 2px; }
-.header-actions { display: flex; align-items: center; gap: 8px; }
-.mode-caption { font-size: 10px; color: #666; }
+.header { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  margin-bottom: 4px;
+}
+.header h1 { 
+  font-size: 18px; 
+  font-weight: 600; 
+  color: rgba(0, 0, 0, 0.85);
+  letter-spacing: -0.01em;
+}
+.header-title { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 2px; 
+}
+.header-actions { 
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+}
+.mode-caption { 
+  font-size: 11px; 
+  color: rgba(0, 0, 0, 0.5);
+  font-weight: 400;
+}
 .ghost {
   border: none;
   background: transparent;
@@ -1276,33 +1332,86 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helve
 }
 .ghost:hover { color: #333; }
 
-.mode button {
-  font-size: 10px;
-  padding: 2px 6px;
-  border: 1px solid #eee;
-  background: white;
-  cursor: pointer;
+.mode {
+  display: flex;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 3px;
+  border-radius: 8px;
+  gap: 2px;
 }
-.mode button.active { background: #333; color: white; border-color: #333; }
+
+.mode button {
+  font-size: 11px;
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+.mode button:hover {
+  color: rgba(0, 0, 0, 0.8);
+}
+.mode button.active { 
+  background: rgba(0, 0, 0, 0.85); 
+  color: white; 
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
 
 textarea {
   width: 100%;
-  height: 60px;
-  border: 1px solid #eee;
-  border-radius: 8px;
-  padding: 8px;
-  font-size: 12px;
+  min-height: 80px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 13px;
+  font-family: inherit;
   resize: none;
+  background: rgba(255, 255, 255, 0.6);
+  color: rgba(0, 0, 0, 0.85);
+  transition: all 0.2s ease;
+  line-height: 1.5;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: #0A84FF;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.1);
+}
+
+textarea::placeholder {
+  color: rgba(0, 0, 0, 0.4);
 }
 
 .actions button.primary {
   width: 100%;
-  background: #333;
+  background: rgba(0, 0, 0, 0.85);
   color: white;
   border: none;
-  padding: 8px;
-  border-radius: 6px;
+  padding: 10px 16px;
+  border-radius: 10px;
   cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.actions button.primary:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.9);
+  transform: scale(1.01);
+}
+
+.actions button.primary:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.actions button.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .loading-card {
@@ -1339,16 +1448,23 @@ textarea {
 }
 
 .result-card {
-  background: #f5f5f5;
-  padding: 10px;
-  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.03);
+  padding: 14px;
+  border-radius: 10px;
   font-size: 13px;
+  border: 0.5px solid rgba(0, 0, 0, 0.06);
+  line-height: 1.5;
+}
+
+.result-card p {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.85);
 }
 
 .result-meta {
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 12px;
-  color: #6b7280;
+  color: rgba(0, 0, 0, 0.5);
 }
 
 .feedback-row {
@@ -1361,8 +1477,15 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  color: #666;
+  color: rgba(0, 0, 0, 0.5);
   font-size: 11px;
+  padding-top: 12px;
+  border-top: 0.5px solid rgba(0, 0, 0, 0.06);
+}
+
+.focus-status small {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.5);
 }
 
 .settings-page {
@@ -1373,6 +1496,95 @@ textarea {
 }
 
 /* Transitions */
-.widget-panel-enter-active, .widget-panel-leave-active { transition: all 0.2s ease; }
-.widget-panel-enter-from, .widget-panel-leave-to { opacity: 0; transform: translateY(-10px); }
+.widget-panel-enter-active, .widget-panel-leave-active { 
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+}
+.widget-panel-enter-from, .widget-panel-leave-to { 
+  opacity: 0; 
+  transform: translateY(-10px) scale(0.95); 
+}
+
+/* 暗黑模式适配 */
+@media (prefers-color-scheme: dark) {
+  .widget-panel {
+    background: rgba(0, 0, 0, 0.6);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 
+      0 10px 40px rgba(0, 0, 0, 0.4),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  }
+  
+  .header h1 {
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .mode-caption {
+    color: rgba(255, 255, 255, 0.6);
+  }
+  
+  .mode {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  
+  .mode button {
+    color: rgba(255, 255, 255, 0.7);
+  }
+  
+  .mode button:hover {
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .mode button.active {
+    background: rgba(255, 255, 255, 0.9);
+    color: rgba(0, 0, 0, 0.85);
+  }
+  
+  textarea {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  textarea::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+  }
+  
+  .actions button.primary {
+    background: rgba(255, 255, 255, 0.9);
+    color: rgba(0, 0, 0, 0.85);
+  }
+  
+  .actions button.primary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 1);
+  }
+  
+  .result-card {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .result-card p {
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .result-meta {
+    color: rgba(255, 255, 255, 0.6);
+  }
+  
+  .focus-status {
+    border-top-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .focus-status small {
+    color: rgba(255, 255, 255, 0.6);
+  }
+  
+  .ghost {
+    color: rgba(255, 255, 255, 0.6);
+  }
+  
+  .ghost:hover {
+    color: rgba(255, 255, 255, 0.9);
+  }
+}
 </style>

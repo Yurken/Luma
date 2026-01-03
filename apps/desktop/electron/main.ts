@@ -100,7 +100,7 @@ const toggleMainWindow = () => {
 };
 
 const createWindow = () => {
-  const win = new BrowserWindow({
+  const winOptions: Electron.BrowserWindowConstructorOptions = {
     width: 360,
     height: 520,
     resizable: false,
@@ -108,24 +108,52 @@ const createWindow = () => {
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    hasShadow: false,
+    hasShadow: false, // 禁用阴影，避免灰色边框
     focusable: false,
     show: false,
-    backgroundColor: "#00000000",
+    backgroundColor: "#00000000", // 完全透明
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       webSecurity: false, // 允许跨域请求
+      backgroundThrottling: false,
     },
-  });
+  };
+
+  // macOS 特定的毛玻璃效果
+  // 注意：如果要完全透明背景，需要移除 vibrancy
+  // 如果需要毛玻璃效果，可以启用下面的代码
+  if (process.platform === "darwin") {
+    // 完全透明模式（无毛玻璃）
+    // 不设置 vibrancy，保持完全透明
+    
+    // 如果需要毛玻璃效果，取消下面的注释：
+    // (winOptions as any).visualEffectState = "active";
+    // (winOptions as any).vibrancy = "under-window";
+  }
+
+  const win = new BrowserWindow(winOptions);
 
   mainWindow = win;
 
+  // 显式设置背景色为透明
+  win.setBackgroundColor("#00000000");
+  
   win.loadURL(DEV_SERVER_URL);
   win.setIgnoreMouseEvents(true, { forward: true });
 
+  // 确保背景完全透明
+  win.setBackgroundColor("#00000000");
+  
   win.once("ready-to-show", () => {
+    // 再次确保背景透明
+    win.setBackgroundColor("#00000000");
     win.showInactive();
     updateTrayMenu();
+  });
+  
+  // 当页面加载完成时，再次确保背景透明
+  win.webContents.once("did-finish-load", () => {
+    win.setBackgroundColor("#00000000");
   });
 
   win.on("close", (event) => {

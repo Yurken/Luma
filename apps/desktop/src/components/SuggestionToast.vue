@@ -93,7 +93,11 @@ const toggleTextInput = () => {
   }
 };
 
-const handleClose = () => {
+const handleClose = (event?: MouseEvent) => {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
   clearIgnoreTimer();
   emit("implicitFeedback", "CLOSED");
   emit("close");
@@ -127,20 +131,31 @@ const reasonText = computed(() => {
   }
   return reason;
 });
+
+const getActionIcon = (actionType?: string) => {
+  const icons: Record<string, string> = {
+    REST_REMINDER: "💤",
+    ENCOURAGE: "💪",
+    TASK_BREAKDOWN: "📋",
+    REFRAME: "🔄",
+    DO_NOT_DISTURB: "🔕",
+  };
+  return icons[actionType || ""] || "💡";
+};
 </script>
 
 <template>
   <Transition name="slide-fade">
-    <div v-if="visible && action" class="toast-card">
-      <div class="toast-header" :style="{ backgroundColor: actionColor }">
-        <span class="toast-type">{{ actionLabel }}</span>
-        <button class="close-btn" @click="handleClose">×</button>
+    <div v-if="visible && action" class="toast-capsule">
+      <div class="capsule-content">
+        <div class="capsule-icon">{{ getActionIcon(action.action_type) }}</div>
+        <div class="capsule-text">
+          <p class="capsule-message">{{ action.message }}</p>
+          <p v-if="reasonText" class="capsule-reason">{{ reasonText }}</p>
+        </div>
+        <button class="capsule-close" @click="handleClose" aria-label="关闭">×</button>
       </div>
-      <div class="toast-body">
-        <p class="message">{{ action.message }}</p>
-        <p v-if="reasonText" class="reason">原因：{{ reasonText }}</p>
-      </div>
-      <div v-if="showTextInput" class="toast-input">
+      <div v-if="showTextInput" class="capsule-input">
         <textarea 
           v-model="feedbackText" 
           placeholder="说说你的想法..."
@@ -155,12 +170,12 @@ const reasonText = computed(() => {
           发送
         </button>
       </div>
-      <div class="toast-footer">
+      <div class="capsule-actions">
         <template v-if="!showTextInput">
-          <button class="feedback-btn like" @click="handleQuickFeedback('LIKE')" title="有用">👍</button>
-          <button class="feedback-btn dislike" @click="handleQuickFeedback('DISLIKE')" title="没用">👎</button>
+          <button class="action-btn" @click="handleQuickFeedback('LIKE')" title="有用">👍</button>
+          <button class="action-btn" @click="handleQuickFeedback('DISLIKE')" title="没用">👎</button>
         </template>
-        <button class="feedback-btn text" @click="toggleTextInput" :title="showTextInput ? '取消输入' : '文字反馈'">
+        <button class="action-btn" @click="toggleTextInput" :title="showTextInput ? '取消输入' : '文字反馈'">
           {{ showTextInput ? '✕' : '💬' }}
         </button>
       </div>
@@ -169,127 +184,224 @@ const reasonText = computed(() => {
 </template>
 
 <style scoped>
-.toast-card {
+.toast-capsule {
   position: absolute;
-  top: 60px; /* Below the orb */
-  right: 10px; /* Align right */
-  width: 280px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  top: 60px;
+  right: 10px;
+  min-width: 280px;
+  max-width: 360px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 25px;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.5);
   overflow: hidden;
   display: flex;
   flex-direction: column;
   z-index: 100;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
 }
 
-.toast-header {
-  padding: 8px 12px;
+.capsule-content {
+  padding: 12px 16px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: white;
-  font-weight: 600;
-  font-size: 12px;
+  align-items: flex-start;
+  gap: 12px;
 }
 
-.close-btn {
+.capsule-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.capsule-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.capsule-message {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.capsule-reason {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.5);
+  line-height: 1.3;
+}
+
+.capsule-close {
   background: none;
   border: none;
-  color: white;
-  font-size: 16px;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 20px;
+  line-height: 1;
   cursor: pointer;
-  padding: 0 4px;
-  opacity: 0.8;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  z-index: 10;
+  position: relative;
+  pointer-events: auto;
+  -webkit-user-select: none;
+  user-select: none;
 }
-.close-btn:hover { opacity: 1; }
 
-.toast-body {
-  padding: 12px;
-  font-size: 14px;
-  color: #333;
-  line-height: 1.5;
-}
-.reason {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #6b7280;
+.capsule-close:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.8);
 }
 
-.toast-input {
-  padding: 0 12px 8px;
+.capsule-input {
+  padding: 0 16px 12px;
   display: flex;
   gap: 8px;
   align-items: flex-end;
 }
 
-.toast-input textarea {
+.capsule-input textarea {
   flex: 1;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
   font-size: 13px;
   font-family: inherit;
+  background: rgba(255, 255, 255, 0.6);
   resize: none;
   outline: none;
+  transition: all 0.2s ease;
 }
 
-.toast-input textarea:focus {
-  border-color: #2196f3;
+.capsule-input textarea:focus {
+  border-color: #0A84FF;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.1);
 }
 
 .send-btn {
   padding: 8px 16px;
-  background: #2196f3;
+  background: #0A84FF;
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 12px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
   white-space: nowrap;
 }
 
 .send-btn:hover:not(:disabled) {
-  background: #1976d2;
+  background: #0071E3;
+  transform: scale(1.02);
+}
+
+.send-btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .send-btn:disabled {
-  background: #ccc;
+  background: rgba(0, 0, 0, 0.1);
+  color: rgba(0, 0, 0, 0.3);
   cursor: not-allowed;
 }
 
-.toast-footer {
-  padding: 8px 12px;
-  background: #f9fafb;
+.capsule-actions {
+  padding: 8px 16px 12px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  border-top: 1px solid #eee;
+  border-top: 0.5px solid rgba(0, 0, 0, 0.08);
 }
 
-.feedback-btn {
-  background: none;
+.action-btn {
+  background: rgba(0, 0, 0, 0.04);
   border: none;
   cursor: pointer;
   font-size: 14px;
-  padding: 4px;
-  border-radius: 4px;
-  transition: background 0.2s;
+  padding: 6px 10px;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  line-height: 1;
 }
-.feedback-btn:hover { background: #e0e0e0; }
-.feedback-btn.text { font-size: 16px; }
+
+.action-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  transform: scale(1.05);
+}
+
+.action-btn:active {
+  transform: scale(0.95);
+}
 
 /* Transitions */
 .slide-fade-enter-active,
 .slide-fade-leave-active {
-  transition: all 0.3s ease-out;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 .slide-fade-enter-from,
 .slide-fade-leave-to {
-  transform: translateY(-10px);
+  transform: translateY(-10px) scale(0.95);
   opacity: 0;
+}
+
+/* 暗黑模式适配 */
+@media (prefers-color-scheme: dark) {
+  .toast-capsule {
+    background: rgba(0, 0, 0, 0.6);
+    box-shadow: 
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  }
+  
+  .capsule-message {
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .capsule-reason {
+    color: rgba(255, 255, 255, 0.6);
+  }
+  
+  .capsule-close {
+    color: rgba(255, 255, 255, 0.6);
+  }
+  
+  .capsule-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .capsule-input textarea {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .capsule-input textarea:focus {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: #0A84FF;
+  }
+  
+  .action-btn {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  
+  .action-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
 }
 </style>

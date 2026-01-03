@@ -213,21 +213,34 @@ onBeforeUnmount(() => {
     @mouseenter="wakeOrb"
     @mouseleave="scheduleAutoHide"
   >
-    <div class="orb-inner"></div>
-    <div class="orb-ring"></div>
+    <div class="orb-glass"></div>
+    <div class="orb-status-dot" :class="{
+      'status-idle': mode === 'SILENT',
+      'status-active': mode === 'LIGHT',
+      'status-warn': mode === 'ACTIVE',
+      'status-loading': loading,
+    }"></div>
+    <div v-if="loading" class="orb-ring"></div>
   </div>
 </template>
 
 <style scoped>
 .orb {
-  width: 48px;
-  height: 48px;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
   position: relative;
   cursor: pointer;
-  transition: transform 0.2s, filter 0.3s, opacity 0.3s;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), 
+              filter 0.3s ease,
+              opacity 0.3s ease;
   user-select: none;
   -webkit-user-select: none;
+  overflow: visible;
+}
+
+.orb:hover {
+  transform: scale(1.05);
 }
 
 .orb:active {
@@ -240,48 +253,100 @@ onBeforeUnmount(() => {
   filter: grayscale(0.2);
 }
 
-.orb-inner {
-  position: absolute;
-  inset: 4px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #ffffff, #a0a0a0);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 2;
-}
-
-.orb-ring {
+/* 磨砂玻璃背景 */
+.orb-glass {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  border: 2px solid transparent;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+    0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 1;
-  animation: spin 10s linear infinite;
+  transition: background 0.2s ease;
 }
 
-/* Modes */
-.orb-silent .orb-inner {
-  background: radial-gradient(circle at 30% 30%, #e0e0e0, #9e9e9e);
+.orb:hover .orb-glass {
+  background: rgba(255, 255, 255, 0.15);
 }
 
-.orb-light .orb-inner {
-  background: radial-gradient(circle at 30% 30%, #e0f7fa, #00bcd4);
-  box-shadow: 0 0 15px rgba(0, 188, 212, 0.4);
+/* 状态指示点 */
+.orb-status-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  z-index: 2;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.orb-active .orb-inner {
-  background: radial-gradient(circle at 30% 30%, #fff3e0, #ff9800);
-  box-shadow: 0 0 20px rgba(255, 152, 0, 0.6);
+.status-idle {
+  background-color: #8E8E93; /* macOS System Gray */
+  box-shadow: 0 0 4px rgba(142, 142, 147, 0.5);
 }
 
-/* Loading */
-.orb-loading .orb-ring {
-  border-top-color: #ffffff;
-  border-right-color: rgba(255, 255, 255, 0.5);
+.status-active {
+  background-color: #0A84FF; /* macOS System Blue */
+  box-shadow: 0 0 8px rgba(10, 132, 255, 0.6);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.status-warn {
+  background-color: #FF9F0A; /* macOS System Orange */
+  box-shadow: 0 0 8px rgba(255, 159, 10, 0.6);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-loading {
+  background-color: #0A84FF;
+  box-shadow: 0 0 12px rgba(10, 132, 255, 0.8);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+}
+
+/* 加载动画环 */
+.orb-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: rgba(10, 132, 255, 0.6);
+  border-right-color: rgba(10, 132, 255, 0.3);
+  z-index: 0;
   animation: spin 1s linear infinite;
 }
 
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* 暗黑模式适配 */
+@media (prefers-color-scheme: dark) {
+  .orb-glass {
+    background: rgba(0, 0, 0, 0.2);
+    box-shadow: 
+      inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+      0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+  
+  .orb:hover .orb-glass {
+    background: rgba(0, 0, 0, 0.25);
+  }
 }
 </style>
