@@ -15,7 +15,6 @@ import (
 	"luma/core/internal/models"
 )
 
-// TODO: Add tables for implicit feedback events, daily/hourly budgets, and focus state snapshots.
 const schema = `
 CREATE TABLE IF NOT EXISTS event_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,9 +40,26 @@ CREATE TABLE IF NOT EXISTS feedback_logs (
   created_at_ms INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS implicit_feedback_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_id TEXT,
+  feedback_type TEXT NOT NULL,
+  feedback_text TEXT,
+  created_at_ms INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS user_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS budget_usage (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  daily_day TEXT NOT NULL,
+  daily_used REAL NOT NULL,
+  hourly_hour TEXT NOT NULL,
+  hourly_used REAL NOT NULL,
   updated_at_ms INTEGER NOT NULL
 );
 
@@ -53,6 +69,7 @@ CREATE TABLE IF NOT EXISTS focus_events (
   app_name TEXT NOT NULL,
   bundle_id TEXT,
   pid INTEGER,
+  window_title TEXT,
   duration_ms INTEGER NOT NULL DEFAULT 0
 );
 
@@ -76,8 +93,20 @@ CREATE TABLE IF NOT EXISTS memory_events (
   importance REAL DEFAULT 0.5
 );
 
+CREATE TABLE IF NOT EXISTS focus_state_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts_ms INTEGER NOT NULL,
+  focus_state TEXT NOT NULL,
+  switch_count INTEGER NOT NULL,
+  no_progress_ms INTEGER NOT NULL,
+  focus_minutes REAL NOT NULL,
+  app_name TEXT,
+  window_title TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_memory_events_type ON memory_events (event_type);
 CREATE INDEX IF NOT EXISTS idx_memory_events_created ON memory_events (created_at_ms);
+CREATE INDEX IF NOT EXISTS idx_focus_state_snapshots_ts_ms ON focus_state_snapshots (ts_ms);
 `
 
 const budgetUsageKey = "budget_usage"
@@ -143,6 +172,9 @@ func applyMigrations(db *sql.DB) error {
 		if err := backfillEventLogs(db); err != nil {
 			return err
 		}
+	}
+	if err := addColumnIfMissing(db, "focus_events", "window_title TEXT"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -327,15 +359,52 @@ func (s *Store) RecordFeedback(reqID, feedback string) error {
 	return nil
 }
 
+func (s *Store) RecordImplicitFeedback(reqID string, feedbackType string, feedbackText string) error {
+	createdAtMs := time.Now().UnixMilli()
+	_, err := s.db.Exec(
+		`INSERT INTO implicit_feedback_events (request_id, feedback_type, feedback_text, created_at_ms)
+		 VALUES (?, ?, ?, ?)`,
+		reqID,
+		feedbackType,
+		feedbackText,
+		createdAtMs,
+	)
+	if err != nil {
+		return fmt.Errorf("insert implicit feedback: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ListLogs(limit int) ([]models.EventLog, error) {
+	return s.ListLogsRange(limit, 0, 0)
+}
+
+func (s *Store) ListLogsRange(limit int, sinceMs int64, untilMs int64) ([]models.EventLog, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(
-		`SELECT request_id, context_json, action_json, raw_action_json, final_action_json, gateway_decision_json, policy_version, model_version, latency_ms, COALESCE(user_feedback, ''), created_at, created_at_ms
-		 FROM event_logs ORDER BY created_at_ms DESC, id DESC LIMIT ?`,
-		limit,
-	)
+	if sinceMs < 0 {
+		sinceMs = 0
+	}
+	where := []string{}
+	args := []any{}
+	if sinceMs > 0 {
+		where = append(where, "created_at_ms >= ?")
+		args = append(args, sinceMs)
+	}
+	if untilMs > 0 {
+		where = append(where, "created_at_ms <= ?")
+		args = append(args, untilMs)
+	}
+
+	query := `SELECT request_id, context_json, action_json, raw_action_json, final_action_json, gateway_decision_json, policy_version, model_version, latency_ms, COALESCE(user_feedback, ''), created_at, created_at_ms FROM event_logs`
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += " ORDER BY created_at_ms DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query logs: %w", err)
 	}
@@ -492,6 +561,51 @@ func (s *Store) GetSetting(key string) (string, bool, error) {
 }
 
 func (s *Store) GetBudgetUsage() (models.BudgetUsage, error) {
+	row := s.db.QueryRow(
+		`SELECT daily_day, daily_used, hourly_hour, hourly_used FROM budget_usage WHERE id = 1`,
+	)
+	var usage models.BudgetUsage
+	if err := row.Scan(&usage.DailyDay, &usage.DailyUsed, &usage.HourlyHour, &usage.HourlyUsed); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return models.BudgetUsage{}, fmt.Errorf("query budget usage: %w", err)
+		}
+		legacy, err := s.loadLegacyBudgetUsage()
+		if err != nil {
+			return models.BudgetUsage{}, err
+		}
+		if legacy.DailyDay != "" || legacy.HourlyHour != "" {
+			_ = s.SetBudgetUsage(legacy)
+			return legacy, nil
+		}
+		return models.BudgetUsage{}, nil
+	}
+	return usage, nil
+}
+
+func (s *Store) SetBudgetUsage(usage models.BudgetUsage) error {
+	updatedAt := time.Now().UnixMilli()
+	_, err := s.db.Exec(
+		`INSERT INTO budget_usage (id, daily_day, daily_used, hourly_hour, hourly_used, updated_at_ms)
+		 VALUES (1, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   daily_day = excluded.daily_day,
+		   daily_used = excluded.daily_used,
+		   hourly_hour = excluded.hourly_hour,
+		   hourly_used = excluded.hourly_used,
+		   updated_at_ms = excluded.updated_at_ms`,
+		usage.DailyDay,
+		usage.DailyUsed,
+		usage.HourlyHour,
+		usage.HourlyUsed,
+		updatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert budget usage: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) loadLegacyBudgetUsage() (models.BudgetUsage, error) {
 	value, ok, err := s.GetSetting(budgetUsageKey)
 	if err != nil {
 		return models.BudgetUsage{}, err
@@ -501,27 +615,20 @@ func (s *Store) GetBudgetUsage() (models.BudgetUsage, error) {
 	}
 	var usage models.BudgetUsage
 	if err := json.Unmarshal([]byte(value), &usage); err != nil {
-		return models.BudgetUsage{}, fmt.Errorf("decode budget usage: %w", err)
+		return models.BudgetUsage{}, fmt.Errorf("decode legacy budget usage: %w", err)
 	}
 	return usage, nil
 }
 
-func (s *Store) SetBudgetUsage(usage models.BudgetUsage) error {
-	raw, err := json.Marshal(usage)
-	if err != nil {
-		return fmt.Errorf("encode budget usage: %w", err)
-	}
-	return s.UpsertSetting(budgetUsageKey, string(raw))
-}
-
 func (s *Store) InsertFocusEvent(event models.FocusEvent) (int64, error) {
 	result, err := s.db.Exec(
-		`INSERT INTO focus_events (ts_ms, app_name, bundle_id, pid, duration_ms)
-		 VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO focus_events (ts_ms, app_name, bundle_id, pid, window_title, duration_ms)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
 		event.TsMs,
 		event.AppName,
 		event.BundleID,
 		event.PID,
+		event.WindowTitle,
 		event.DurationMs,
 	)
 	if err != nil {
@@ -546,13 +653,25 @@ func (s *Store) UpdateFocusDuration(id int64, durationMs int64) error {
 	return nil
 }
 
+func (s *Store) UpdateFocusWindowTitle(id int64, title string) error {
+	_, err := s.db.Exec(
+		`UPDATE focus_events SET window_title = ? WHERE id = ?`,
+		title,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("update focus window title: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) LatestFocusEvent() (models.FocusEvent, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id, ts_ms, app_name, COALESCE(bundle_id, ''), COALESCE(pid, 0), duration_ms
+		`SELECT id, ts_ms, app_name, COALESCE(bundle_id, ''), COALESCE(pid, 0), COALESCE(window_title, ''), duration_ms
 		 FROM focus_events ORDER BY ts_ms DESC, id DESC LIMIT 1`,
 	)
 	var event models.FocusEvent
-	if err := row.Scan(&event.ID, &event.TsMs, &event.AppName, &event.BundleID, &event.PID, &event.DurationMs); err != nil {
+	if err := row.Scan(&event.ID, &event.TsMs, &event.AppName, &event.BundleID, &event.PID, &event.WindowTitle, &event.DurationMs); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return models.FocusEvent{}, false, nil
 		}
@@ -565,9 +684,8 @@ func (s *Store) ListFocusEvents(limit int) ([]models.FocusEvent, error) {
 	if limit <= 0 {
 		limit = 200
 	}
-	// TODO: Add queries for app-switch counts and rolling-window focus metrics.
 	rows, err := s.db.Query(
-		`SELECT id, ts_ms, app_name, COALESCE(bundle_id, ''), COALESCE(pid, 0), duration_ms
+		`SELECT id, ts_ms, app_name, COALESCE(bundle_id, ''), COALESCE(pid, 0), COALESCE(window_title, ''), duration_ms
 		 FROM focus_events ORDER BY ts_ms DESC, id DESC LIMIT ?`,
 		limit,
 	)
@@ -579,7 +697,7 @@ func (s *Store) ListFocusEvents(limit int) ([]models.FocusEvent, error) {
 	var events []models.FocusEvent
 	for rows.Next() {
 		var event models.FocusEvent
-		if err := rows.Scan(&event.ID, &event.TsMs, &event.AppName, &event.BundleID, &event.PID, &event.DurationMs); err != nil {
+		if err := rows.Scan(&event.ID, &event.TsMs, &event.AppName, &event.BundleID, &event.PID, &event.WindowTitle, &event.DurationMs); err != nil {
 			return nil, fmt.Errorf("scan focus event: %w", err)
 		}
 		events = append(events, event)
@@ -588,6 +706,142 @@ func (s *Store) ListFocusEvents(limit int) ([]models.FocusEvent, error) {
 		return nil, fmt.Errorf("focus rows: %w", err)
 	}
 	return events, nil
+}
+
+func (s *Store) FocusMetrics(windowMs int64) (models.FocusMetrics, error) {
+	if windowMs <= 0 {
+		windowMs = int64((10 * time.Minute).Milliseconds())
+	}
+	sinceMs := time.Now().UnixMilli() - windowMs
+	if sinceMs < 0 {
+		sinceMs = 0
+	}
+	rows, err := s.db.Query(
+		`SELECT ts_ms, duration_ms FROM focus_events WHERE ts_ms >= ? ORDER BY ts_ms ASC`,
+		sinceMs,
+	)
+	if err != nil {
+		return models.FocusMetrics{}, fmt.Errorf("query focus metrics: %w", err)
+	}
+	defer rows.Close()
+
+	type focusRow struct {
+		tsMs       int64
+		durationMs int64
+	}
+	var events []focusRow
+	for rows.Next() {
+		var row focusRow
+		if err := rows.Scan(&row.tsMs, &row.durationMs); err != nil {
+			return models.FocusMetrics{}, fmt.Errorf("scan focus metrics: %w", err)
+		}
+		events = append(events, row)
+	}
+	if err := rows.Err(); err != nil {
+		return models.FocusMetrics{}, fmt.Errorf("focus metrics rows: %w", err)
+	}
+
+	var totalMs int64
+	nowMs := time.Now().UnixMilli()
+	for i, event := range events {
+		if event.durationMs > 0 {
+			totalMs += event.durationMs
+			continue
+		}
+		if i+1 < len(events) {
+			delta := events[i+1].tsMs - event.tsMs
+			if delta > 0 {
+				totalMs += delta
+			}
+			continue
+		}
+		delta := nowMs - event.tsMs
+		if delta > 0 {
+			totalMs += delta
+		}
+	}
+
+	switchCount := 0
+	if len(events) > 1 {
+		switchCount = len(events) - 1
+	}
+	return models.FocusMetrics{
+		WindowMs:     windowMs,
+		SwitchCount:  switchCount,
+		FocusMinutes: float64(totalMs) / 60000,
+	}, nil
+}
+
+func (s *Store) InsertFocusStateSnapshot(snapshot models.FocusStateSnapshot) error {
+	_, err := s.db.Exec(
+		`INSERT INTO focus_state_snapshots (ts_ms, focus_state, switch_count, no_progress_ms, focus_minutes, app_name, window_title)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		snapshot.TsMs,
+		snapshot.FocusState,
+		snapshot.SwitchCount,
+		snapshot.NoProgressMs,
+		snapshot.FocusMinutes,
+		snapshot.AppName,
+		snapshot.WindowTitle,
+	)
+	if err != nil {
+		return fmt.Errorf("insert focus state snapshot: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListFocusStateSnapshots(limit int, sinceMs int64, untilMs int64) ([]models.FocusStateSnapshot, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if sinceMs < 0 {
+		sinceMs = 0
+	}
+
+	where := []string{}
+	args := []any{}
+	if sinceMs > 0 {
+		where = append(where, "ts_ms >= ?")
+		args = append(args, sinceMs)
+	}
+	if untilMs > 0 {
+		where = append(where, "ts_ms <= ?")
+		args = append(args, untilMs)
+	}
+
+	query := `SELECT ts_ms, focus_state, switch_count, no_progress_ms, focus_minutes, COALESCE(app_name, ''), COALESCE(window_title, '') FROM focus_state_snapshots`
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += " ORDER BY ts_ms DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query focus state snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var snapshots []models.FocusStateSnapshot
+	for rows.Next() {
+		var snapshot models.FocusStateSnapshot
+		if err := rows.Scan(
+			&snapshot.TsMs,
+			&snapshot.FocusState,
+			&snapshot.SwitchCount,
+			&snapshot.NoProgressMs,
+			&snapshot.FocusMinutes,
+			&snapshot.AppName,
+			&snapshot.WindowTitle,
+		); err != nil {
+			return nil, fmt.Errorf("scan focus state snapshot: %w", err)
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("focus state snapshot rows: %w", err)
+	}
+	return snapshots, nil
 }
 
 func parseCreatedAt(createdAt string, createdAtMs int64) time.Time {

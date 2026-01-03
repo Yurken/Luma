@@ -7,6 +7,8 @@ type Action = {
   confidence: number;
   cost: number;
   risk_level: string;
+  reason?: string;
+  state?: string;
 };
 
 const props = defineProps<{
@@ -73,7 +75,14 @@ const actionLabel = computed(() => {
     default: return "建议";
   }
 });
-// TODO: Show "why" explanation when Action includes a reason field.
+
+const reasonText = computed(() => {
+  const reason = props.action?.reason?.trim() || "";
+  if (!reason || reason === "model_no_reason") {
+    return "";
+  }
+  return reason;
+});
 </script>
 
 <template>
@@ -85,6 +94,7 @@ const actionLabel = computed(() => {
       </div>
       <div class="toast-body">
         <p class="message">{{ action.message }}</p>
+        <p v-if="reasonText" class="reason">原因：{{ reasonText }}</p>
       </div>
       <div v-if="showTextInput" class="toast-input">
         <textarea 
@@ -155,6 +165,11 @@ const actionLabel = computed(() => {
   font-size: 14px;
   color: #333;
   line-height: 1.5;
+}
+.reason {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .toast-input {

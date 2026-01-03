@@ -1,8 +1,10 @@
 from policy.base import Policy
+from policy.bandit import BanditPolicy
 from policy.ollama import OllamaPolicy
 from policy.unavailable import UnavailablePolicy
 
 _POLICIES = {
+    "bandit": BanditPolicy(),
     "ollama": OllamaPolicy(),
 }
 

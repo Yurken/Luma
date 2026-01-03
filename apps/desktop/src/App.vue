@@ -11,6 +11,8 @@ type Action = {
   confidence: number;
   cost: number;
   risk_level: string;
+  reason?: string;
+  state?: string;
 };
 
 type GatewayDecision = {

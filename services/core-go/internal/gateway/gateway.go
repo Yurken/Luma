@@ -296,6 +296,34 @@ func (g *Gateway) Evaluate(ctx models.Context, action models.Action) (models.Act
 	return action, decision
 }
 
+func (g *Gateway) CanIntervene(ctx models.Context, cost float64) (bool, string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	now := time.Now()
+	g.refreshConfigLocked()
+	g.loadUsageLocked(now)
+	g.replenishBudgetLocked(ctx.Mode, now)
+
+	if g.config.CooldownSeconds > 0 && time.Since(g.lastIntervention).Seconds() < g.config.CooldownSeconds {
+		return false, ReasonCooldownActive
+	}
+	if g.config.HourlyCap > 0 && g.hourlyUsed+cost > g.config.HourlyCap {
+		return false, ReasonBudgetExhausted
+	}
+	if g.config.DailyCap > 0 && g.dailyUsed+cost > g.config.DailyCap {
+		return false, ReasonBudgetExhausted
+	}
+	if g.currentBudget[ctx.Mode] < cost {
+		return false, ReasonBudgetExhausted
+	}
+	return true, "allow"
+}
+
+func MaxActionCost() float64 {
+	return 3.0
+}
+
 func (g *Gateway) replenishBudgetLocked(mode models.Mode, now time.Time) {
 	lastUpdate, ok := g.lastUpdate[mode]
 	if !ok {

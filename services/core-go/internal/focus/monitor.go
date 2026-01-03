@@ -123,12 +123,16 @@ func (m *Monitor) Current() (models.FocusCurrent, bool, error) {
 	if focusMs < 0 {
 		focusMs = 0
 	}
+	title := m.lastWindowTitle
+	if title == "" {
+		title = event.WindowTitle
+	}
 	return models.FocusCurrent{
 		TsMs:         event.TsMs,
 		AppName:      event.AppName,
 		BundleID:     event.BundleID,
 		PID:          event.PID,
-		WindowTitle:  m.lastWindowTitle,
+		WindowTitle:  title,
 		FocusMinutes: float64(focusMs) / 60000,
 	}, true, nil
 }
@@ -163,7 +167,8 @@ func (m *Monitor) handleSnapshot(snapshot FocusSnapshot) {
 	last := m.last
 	hasLast := m.hasLast
 	prevTitle := m.lastWindowTitle
-	currentTitle := snapshot.WindowTitle
+	snapshotTitle := snapshot.WindowTitle
+	currentTitle := snapshotTitle
 	if currentTitle == "" {
 		currentTitle = prevTitle
 	}
@@ -177,6 +182,14 @@ func (m *Monitor) handleSnapshot(snapshot FocusSnapshot) {
 	}
 
 	same := hasLast && sameApp(snapshot, last)
+	var updateTitleID int64
+	var updateTitle string
+	if titleChanged && same && last.ID != 0 {
+		updateTitleID = last.ID
+		updateTitle = currentTitle
+		last.WindowTitle = currentTitle
+		m.last = last
+	}
 	if hasLast && !same {
 		m.switches = append(m.switches, nowMs)
 		m.pruneSwitchesLocked(nowMs)
@@ -190,6 +203,12 @@ func (m *Monitor) handleSnapshot(snapshot FocusSnapshot) {
 		}
 	}
 	m.mu.Unlock()
+
+	if updateTitleID != 0 {
+		if err := m.store.UpdateFocusWindowTitle(updateTitleID, updateTitle); err != nil {
+			m.logger.Error("update focus window title failed", slog.Any("error", err))
+		}
+	}
 
 	if hasLast && same {
 		return
@@ -206,11 +225,12 @@ func (m *Monitor) handleSnapshot(snapshot FocusSnapshot) {
 	}
 
 	newEvent := models.FocusEvent{
-		TsMs:       nowMs,
-		AppName:    snapshot.AppName,
-		BundleID:   snapshot.BundleID,
-		PID:        snapshot.PID,
-		DurationMs: 0,
+		TsMs:        nowMs,
+		AppName:     snapshot.AppName,
+		BundleID:    snapshot.BundleID,
+		PID:         snapshot.PID,
+		WindowTitle: snapshotTitle,
+		DurationMs:  0,
 	}
 	id, err := m.store.InsertFocusEvent(newEvent)
 	if err != nil {
@@ -281,6 +301,9 @@ func (m *Monitor) loadLastEvent() {
 	m.mu.Lock()
 	m.last = event
 	m.hasLast = true
+	if event.WindowTitle != "" {
+		m.lastWindowTitle = event.WindowTitle
+	}
 	m.mu.Unlock()
 }
 

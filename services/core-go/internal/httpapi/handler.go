@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,7 @@ const (
 	settingDailyBudgetCap     = "daily_budget_cap"
 	settingHourlyBudgetCap    = "hourly_budget_cap"
 	settingCooldownSeconds    = "cooldown_seconds"
+	settingLastAutoSuggestMs  = "last_auto_suggestion_ms"
 )
 
 var allowedSettings = map[string]bool{
@@ -53,6 +55,8 @@ var allowedSettings = map[string]bool{
 	settingHourlyBudgetCap:    true,
 	settingCooldownSeconds:    true,
 }
+
+const autoSuggestionWindow = 10 * time.Minute
 
 type Handler struct {
 	store   *db.Store
@@ -92,7 +96,9 @@ func (h *Handler) Router() chi.Router {
 	r.Get("/v1/ollama/models", h.handleOllamaModels)
 	r.Get("/v1/settings", h.handleSettingsGet)
 	r.Post("/v1/settings", h.handleSettingsPost)
-	// TODO: Add endpoints for profile summary, learning explanations, and state history.
+	r.Get("/v1/profile", h.handleProfile)
+	r.Get("/v1/learning/explanations", h.handleLearningExplanations)
+	r.Get("/v1/state/history", h.handleStateHistory)
 	return r
 }
 
@@ -124,8 +130,6 @@ func (h *Handler) handleDecision(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// TODO: If within quiet hours, return DO_NOT_DISTURB without calling AI.
-	// TODO: For auto-suggestions (empty user_text), enforce max-1-per-window and budget checks pre-AI.
 
 	requestID := req.RequestID
 	if requestID == "" {
@@ -161,38 +165,46 @@ func (h *Handler) handleDecision(w http.ResponseWriter, r *http.Request) {
 			Cost:       0,
 			RiskLevel:  models.RiskLow,
 		}
-		finalAction, gatewayDecision := h.gateway.Evaluate(req.Context, action)
-		createdAt := time.Now()
-		resp := models.DecisionResponse{
-			RequestID:       requestID,
-			Context:         req.Context,
-			Action:          finalAction,
-			PolicyVersion:   decisionSettings.policyVersion(),
-			ModelVersion:    "n/a",
-			LatencyMs:       0,
-			CreatedAt:       createdAt,
-			CreatedAtMs:     createdAt.UnixMilli(),
-			GatewayDecision: gatewayDecision,
+		h.respondWithAction(w, requestID, req.Context, action, decisionSettings.policyVersion(), "n/a", 0)
+		return
+	}
+
+	quietHours := req.Context.Signals["quiet_hours"]
+	if quietHours == "" {
+		if value, ok, err := h.store.GetSetting(settingQuietHours); err == nil && ok {
+			quietHours = value
 		}
-		logEntry := models.DecisionLogEntry{
-			RequestID:       requestID,
-			Context:         req.Context,
-			RawAction:       action,
-			FinalAction:     finalAction,
-			GatewayDecision: gatewayDecision,
-			PolicyVersion:   resp.PolicyVersion,
-			ModelVersion:    resp.ModelVersion,
-			LatencyMs:       resp.LatencyMs,
-			CreatedAt:       createdAt,
-			CreatedAtMs:     createdAt.UnixMilli(),
+	}
+	if quietHours != "" && withinQuietHours(time.Now(), quietHours) {
+		action := models.Action{
+			ActionType: models.ActionDoNotDisturb,
+			Message:    "安静时段内，已暂停提示。",
+			Confidence: 1,
+			Cost:       0,
+			RiskLevel:  models.RiskLow,
 		}
-		if err := h.store.InsertDecision(logEntry); err != nil {
-			h.logger.Error("insert decision failed", slog.String("request_id", requestID), slog.Any("error", err))
-			respondError(w, http.StatusInternalServerError, "db error")
+		h.respondWithAction(w, requestID, req.Context, action, "quiet_hours", "n/a", 0)
+		return
+	}
+
+	if req.Context.UserText == "" {
+		allowed, reason, err := h.shouldAllowAutoSuggestion(req.Context)
+		if err != nil {
+			h.logger.Error("auto suggestion check failed", slog.String("request_id", requestID), slog.Any("error", err))
+			respondError(w, http.StatusInternalServerError, "auto suggestion error")
 			return
 		}
-		respondJSON(w, http.StatusOK, resp)
-		return
+		if !allowed {
+			action := models.Action{
+				ActionType: models.ActionDoNotDisturb,
+				Message:    autoSuggestionMessage(reason),
+				Confidence: 1,
+				Cost:       0,
+				RiskLevel:  models.RiskLow,
+			}
+			h.respondWithAction(w, requestID, req.Context, action, "auto_guard", "n/a", 0)
+			return
+		}
 	}
 
 	start := time.Now()
@@ -287,7 +299,11 @@ func (h *Handler) handleFeedback(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	// TODO: Accept implicit feedback types (IGNORED/CLOSED/OPEN_PANEL) and persist them.
+	if isImplicitFeedback(req.Feedback) {
+		if err := h.store.RecordImplicitFeedback(req.RequestID, string(req.Feedback), req.FeedbackText); err != nil {
+			h.logger.Error("record implicit feedback failed", slog.String("request_id", req.RequestID), slog.Any("error", err))
+		}
+	}
 	if err := h.ai.Feedback(req.RequestID, feedbackValue); err != nil {
 		h.logger.Error("forward feedback failed", slog.String("request_id", req.RequestID), slog.Any("error", err))
 	}
@@ -390,11 +406,30 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	// TODO: Add time-range filters and aggregated history for UI timelines.
-	logs, err := h.store.ListLogs(limit)
+	var sinceMs int64
+	if s := r.URL.Query().Get("since_ms"); s != "" {
+		if parsed, err := parseInt64(s); err == nil {
+			sinceMs = parsed
+		}
+	}
+	var untilMs int64
+	if s := r.URL.Query().Get("until_ms"); s != "" {
+		if parsed, err := parseInt64(s); err == nil {
+			untilMs = parsed
+		}
+	}
+	aggregate := r.URL.Query().Get("aggregate")
+	logs, err := h.store.ListLogsRange(limit, sinceMs, untilMs)
 	if err != nil {
 		h.logger.Error("list logs failed", slog.Any("error", err))
 		respondError(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if aggregate == "1" || strings.EqualFold(aggregate, "true") {
+		respondJSON(w, http.StatusOK, map[string]any{
+			"logs":      logs,
+			"aggregate": aggregateLogs(logs),
+		})
 		return
 	}
 	respondJSON(w, http.StatusOK, logs)
@@ -535,6 +570,75 @@ func (h *Handler) handleMemoryReset(w http.ResponseWriter, _ *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (h *Handler) handleProfile(w http.ResponseWriter, _ *http.Request) {
+	profiles, err := h.memory.ListProfiles()
+	if err != nil {
+		h.logger.Error("list profiles failed", slog.Any("error", err))
+		respondError(w, http.StatusInternalServerError, "profiles error")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"summary":  h.memory.GetProfileSummary(),
+		"profiles": profiles,
+	})
+}
+
+func (h *Handler) handleLearningExplanations(w http.ResponseWriter, r *http.Request) {
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := parseInt(l); err == nil {
+			limit = parsed
+		}
+	}
+	profiles, err := h.memory.ListProfiles()
+	if err != nil {
+		h.logger.Error("list profiles failed", slog.Any("error", err))
+		respondError(w, http.StatusInternalServerError, "profiles error")
+		return
+	}
+	events, err := h.memory.ListEvents(limit)
+	if err != nil {
+		h.logger.Error("list memory events failed", slog.Any("error", err))
+		respondError(w, http.StatusInternalServerError, "memory events error")
+		return
+	}
+	explanations := buildLearningExplanations(profiles)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"summary":      h.memory.GetProfileSummary(),
+		"explanations": explanations,
+		"profiles":     profiles,
+		"events":       events,
+	})
+}
+
+func (h *Handler) handleStateHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 200
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := parseInt(l); err == nil {
+			limit = parsed
+		}
+	}
+	var sinceMs int64
+	if s := r.URL.Query().Get("since_ms"); s != "" {
+		if parsed, err := parseInt64(s); err == nil {
+			sinceMs = parsed
+		}
+	}
+	var untilMs int64
+	if s := r.URL.Query().Get("until_ms"); s != "" {
+		if parsed, err := parseInt64(s); err == nil {
+			untilMs = parsed
+		}
+	}
+	snapshots, err := h.store.ListFocusStateSnapshots(limit, sinceMs, untilMs)
+	if err != nil {
+		h.logger.Error("list state history failed", slog.Any("error", err))
+		respondError(w, http.StatusInternalServerError, "state history error")
+		return
+	}
+	respondJSON(w, http.StatusOK, snapshots)
+}
+
 func (h *Handler) handleOllamaModels(w http.ResponseWriter, r *http.Request) {
 	tagsURL := ollamaTagsURL()
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, tagsURL, nil)
@@ -586,12 +690,92 @@ func respondError(w http.ResponseWriter, status int, message string) {
 	respondJSON(w, status, map[string]string{"error": message})
 }
 
+func (h *Handler) respondWithAction(w http.ResponseWriter, requestID string, ctx models.Context, rawAction models.Action, policyVersion string, modelVersion string, latency int64) {
+	finalAction, gatewayDecision := h.gateway.Evaluate(ctx, rawAction)
+	createdAt := time.Now()
+	resp := models.DecisionResponse{
+		RequestID:       requestID,
+		Context:         ctx,
+		Action:          finalAction,
+		PolicyVersion:   policyVersion,
+		ModelVersion:    modelVersion,
+		LatencyMs:       latency,
+		CreatedAt:       createdAt,
+		CreatedAtMs:     createdAt.UnixMilli(),
+		GatewayDecision: gatewayDecision,
+	}
+	logEntry := models.DecisionLogEntry{
+		RequestID:       requestID,
+		Context:         ctx,
+		RawAction:       rawAction,
+		FinalAction:     finalAction,
+		GatewayDecision: gatewayDecision,
+		PolicyVersion:   policyVersion,
+		ModelVersion:    modelVersion,
+		LatencyMs:       latency,
+		CreatedAt:       createdAt,
+		CreatedAtMs:     createdAt.UnixMilli(),
+	}
+	if err := h.store.InsertDecision(logEntry); err != nil {
+		h.logger.Error("insert decision failed", slog.String("request_id", requestID), slog.Any("error", err))
+		respondError(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	respondJSON(w, http.StatusOK, resp)
+}
+
 func parseInt(val string) (int, error) {
 	return strconv.Atoi(val)
 }
 
 func parseInt64(val string) (int64, error) {
 	return strconv.ParseInt(val, 10, 64)
+}
+
+type logAggregateBucket struct {
+	Bucket     string         `json:"bucket"`
+	Total      int            `json:"total"`
+	ByAction   map[string]int `json:"by_action"`
+	ByDecision map[string]int `json:"by_decision"`
+}
+
+func aggregateLogs(logs []models.EventLog) []logAggregateBucket {
+	buckets := map[string]*logAggregateBucket{}
+	for _, entry := range logs {
+		ts := entry.CreatedAtMs
+		if ts == 0 {
+			ts = entry.CreatedAt.UnixMilli()
+		}
+		bucketKey := time.UnixMilli(ts).Format("2006-01-02 15:00")
+		bucket := buckets[bucketKey]
+		if bucket == nil {
+			bucket = &logAggregateBucket{
+				Bucket:     bucketKey,
+				ByAction:   map[string]int{},
+				ByDecision: map[string]int{},
+			}
+			buckets[bucketKey] = bucket
+		}
+		bucket.Total++
+		if entry.Action.ActionType != "" {
+			bucket.ByAction[string(entry.Action.ActionType)]++
+		}
+		if entry.GatewayDecision.Decision != "" {
+			bucket.ByDecision[string(entry.GatewayDecision.Decision)]++
+		}
+	}
+
+	keys := make([]string, 0, len(buckets))
+	for key := range buckets {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := make([]logAggregateBucket, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, *buckets[key])
+	}
+	return result
 }
 
 func ollamaTagsURL() string {
@@ -688,6 +872,8 @@ func validateFeedback(req models.FeedbackRequest) error {
 		models.FeedbackDislike: true,
 		models.FeedbackAdopted: true,
 		models.FeedbackIgnored: true,
+		models.FeedbackClosed:  true,
+		models.FeedbackOpen:    true,
 	}
 	if !valid[req.Feedback] {
 		return fmt.Errorf("invalid feedback")
@@ -700,7 +886,6 @@ func enrichSignals(store *db.Store, focusMonitor *focus.Monitor, payload *models
 	if _, ok := payload.Signals["session_minutes"]; !ok {
 		payload.Signals["session_minutes"] = "0"
 	}
-	// TODO: Compute app switch counts in a rolling window and derive rule-based focus state.
 
 	quietHours, ok, err := store.GetSetting(settingQuietHours)
 	if err != nil {
@@ -730,6 +915,14 @@ func enrichSignals(store *db.Store, focusMonitor *focus.Monitor, payload *models
 	}
 
 	if focusMonitor != nil && focusMonitor.Enabled() {
+		switchCount := focusMonitor.SwitchCount()
+		payload.SwitchCount = switchCount
+		payload.Signals["switch_count"] = strconv.Itoa(switchCount)
+		noProgress, noProgressDuration := focusMonitor.NoProgress()
+		if noProgress {
+			payload.Signals["no_progress_minutes"] = fmt.Sprintf("%.1f", noProgressDuration.Minutes())
+		}
+
 		current, ok, err := focusMonitor.Current()
 		if err != nil {
 			return nil
@@ -747,6 +940,27 @@ func enrichSignals(store *db.Store, focusMonitor *focus.Monitor, payload *models
 			if _, exists := payload.Signals["focus_minutes"]; !exists {
 				payload.Signals["focus_minutes"] = fmt.Sprintf("%.1f", current.FocusMinutes)
 			}
+			focusState := deriveFocusState(current.FocusMinutes, switchCount, noProgress, noProgressDuration)
+			payload.FocusState = focusState
+			payload.Signals["focus_state"] = focusState
+			_ = store.InsertFocusStateSnapshot(models.FocusStateSnapshot{
+				TsMs:         time.Now().UnixMilli(),
+				FocusState:   focusState,
+				SwitchCount:  switchCount,
+				NoProgressMs: noProgressDuration.Milliseconds(),
+				FocusMinutes: current.FocusMinutes,
+				AppName:      current.AppName,
+				WindowTitle:  current.WindowTitle,
+			})
+		}
+	} else {
+		if metrics, err := store.FocusMetrics(int64((10 * time.Minute).Milliseconds())); err == nil {
+			payload.SwitchCount = metrics.SwitchCount
+			payload.Signals["switch_count"] = strconv.Itoa(metrics.SwitchCount)
+			payload.Signals["focus_minutes_window"] = fmt.Sprintf("%.1f", metrics.FocusMinutes)
+			focusState := deriveFocusState(metrics.FocusMinutes, metrics.SwitchCount, false, 0)
+			payload.FocusState = focusState
+			payload.Signals["focus_state"] = focusState
 		}
 	}
 	return nil
@@ -826,6 +1040,130 @@ func isValidQuietHours(value string) bool {
 		}
 	}
 	return true
+}
+
+func withinQuietHours(now time.Time, quietHours string) bool {
+	parts := strings.Split(quietHours, "-")
+	if len(parts) != 2 {
+		return false
+	}
+	start, err := time.Parse("15:04", strings.TrimSpace(parts[0]))
+	if err != nil {
+		return false
+	}
+	end, err := time.Parse("15:04", strings.TrimSpace(parts[1]))
+	if err != nil {
+		return false
+	}
+	nowMinutes := now.Hour()*60 + now.Minute()
+	startMinutes := start.Hour()*60 + start.Minute()
+	endMinutes := end.Hour()*60 + end.Minute()
+	if startMinutes == endMinutes {
+		return false
+	}
+	if startMinutes < endMinutes {
+		return nowMinutes >= startMinutes && nowMinutes < endMinutes
+	}
+	return nowMinutes >= startMinutes || nowMinutes < endMinutes
+}
+
+func (h *Handler) shouldAllowAutoSuggestion(ctx models.Context) (bool, string, error) {
+	now := time.Now()
+	lastRaw, ok, err := h.store.GetSetting(settingLastAutoSuggestMs)
+	if err != nil {
+		return false, "", err
+	}
+	if ok && lastRaw != "" {
+		if lastMs, err := strconv.ParseInt(lastRaw, 10, 64); err == nil {
+			if now.UnixMilli()-lastMs < autoSuggestionWindow.Milliseconds() {
+				return false, "auto_window", nil
+			}
+		}
+	}
+	allowed, reason := h.gateway.CanIntervene(ctx, gateway.MaxActionCost())
+	if !allowed {
+		return false, reason, nil
+	}
+	if err := h.store.UpsertSetting(settingLastAutoSuggestMs, strconv.FormatInt(now.UnixMilli(), 10)); err != nil {
+		return false, "", err
+	}
+	return true, "allow", nil
+}
+
+func autoSuggestionMessage(reason string) string {
+	switch reason {
+	case "auto_window":
+		return "自动提示冷却中。"
+	case gateway.ReasonCooldownActive:
+		return "处于冷却期，已暂停自动提示。"
+	case gateway.ReasonBudgetExhausted:
+		return "干预预算不足，已暂停自动提示。"
+	default:
+		return "当前不生成自动提示。"
+	}
+}
+
+func isImplicitFeedback(feedback models.FeedbackType) bool {
+	switch feedback {
+	case models.FeedbackIgnored, models.FeedbackClosed, models.FeedbackOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+func deriveFocusState(focusMinutes float64, switchCount int, noProgress bool, noProgressDuration time.Duration) string {
+	if noProgress && noProgressDuration >= 20*time.Minute {
+		return "NO_PROGRESS"
+	}
+	if switchCount >= 8 {
+		return "DISTRACTED"
+	}
+	if focusMinutes >= 25 {
+		return "FOCUSED"
+	}
+	return "LIGHT"
+}
+
+func buildLearningExplanations(profiles []memory.Profile) []string {
+	explanations := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile.Confidence < 0.4 {
+			continue
+		}
+		key := strings.TrimSpace(profile.Key)
+		value := strings.TrimSpace(profile.Value)
+		switch {
+		case key == "preferred_intervention_budget":
+			explanations = append(explanations, fmt.Sprintf("提示频率偏好: %s", value))
+		case key == "tolerance_night_intervention":
+			explanations = append(explanations, fmt.Sprintf("夜间提示容忍度: %s", value))
+		case strings.HasPrefix(key, "accepts_action_"):
+			action := strings.TrimPrefix(key, "accepts_action_")
+			actionLabel := describeActionType(action)
+			explanations = append(explanations, fmt.Sprintf("对%s的接受度: %s", actionLabel, value))
+		default:
+			explanations = append(explanations, fmt.Sprintf("%s: %s", key, value))
+		}
+	}
+	return explanations
+}
+
+func describeActionType(raw string) string {
+	switch strings.ToUpper(raw) {
+	case "REST_REMINDER":
+		return "休息提醒"
+	case "ENCOURAGE":
+		return "鼓励"
+	case "TASK_BREAKDOWN":
+		return "任务拆解"
+	case "REFRAME":
+		return "换个角度"
+	case "DO_NOT_DISTURB":
+		return "勿扰"
+	default:
+		return raw
+	}
 }
 
 type decisionSettings struct {

@@ -31,6 +31,8 @@ class Context(BaseModel):
     history_summary: Optional[str] = ""
     profile_summary: Optional[str] = ""
     memory_summary: Optional[str] = ""
+    focus_state: Optional[str] = ""
+    switch_count: Optional[int] = 0
 
 
 class Action(BaseModel):
@@ -39,7 +41,8 @@ class Action(BaseModel):
     confidence: float = Field(ge=0, le=1)
     cost: float
     risk_level: RiskLevel
-    # TODO: Add optional reason/explanation fields for transparency.
+    reason: Optional[str] = ""
+    state: Optional[str] = ""
 
 
 class DecideRequest(BaseModel):

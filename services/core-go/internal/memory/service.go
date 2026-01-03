@@ -29,6 +29,14 @@ type Profile struct {
 	Key        string  `json:"key"`
 	Value      string  `json:"value"`
 	Confidence float64 `json:"confidence"`
+	UpdatedAt  int64   `json:"updated_at_ms"`
+}
+
+type MemoryEvent struct {
+	EventType   string  `json:"event_type"`
+	Summary     string  `json:"summary"`
+	CreatedAtMs int64   `json:"created_at_ms"`
+	Importance  float64 `json:"importance"`
 }
 
 // GetProfileSummary returns a natural language summary of user profiles
@@ -118,6 +126,54 @@ func (s *Service) SetProfile(key, value string, confidence float64) error {
 		key, value, confidence, time.Now().UnixMilli(),
 	)
 	return err
+}
+
+func (s *Service) ListProfiles() ([]Profile, error) {
+	rows, err := s.db.Query("SELECT key, value, confidence, updated_at_ms FROM profiles ORDER BY updated_at_ms DESC")
+	if err != nil {
+		return nil, fmt.Errorf("list profiles: %w", err)
+	}
+	defer rows.Close()
+
+	var profiles []Profile
+	for rows.Next() {
+		var profile Profile
+		if err := rows.Scan(&profile.Key, &profile.Value, &profile.Confidence, &profile.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan profile: %w", err)
+		}
+		profiles = append(profiles, profile)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("profile rows: %w", err)
+	}
+	return profiles, nil
+}
+
+func (s *Service) ListEvents(limit int) ([]MemoryEvent, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.Query(
+		"SELECT event_type, summary, created_at_ms, importance FROM memory_events ORDER BY created_at_ms DESC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list memory events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []MemoryEvent
+	for rows.Next() {
+		var event MemoryEvent
+		if err := rows.Scan(&event.EventType, &event.Summary, &event.CreatedAtMs, &event.Importance); err != nil {
+			return nil, fmt.Errorf("scan memory event: %w", err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory event rows: %w", err)
+	}
+	return events, nil
 }
 
 func (s *Service) Reset() error {

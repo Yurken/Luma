@@ -17,6 +17,8 @@ const (
 	FeedbackDislike FeedbackType = "DISLIKE"
 	FeedbackAdopted FeedbackType = "ADOPTED"
 	FeedbackIgnored FeedbackType = "IGNORED"
+	FeedbackClosed  FeedbackType = "CLOSED"
+	FeedbackOpen    FeedbackType = "OPEN_PANEL"
 )
 
 type RiskLevel string
@@ -53,7 +55,8 @@ type Context struct {
 	HistorySummary string            `json:"history_summary"`
 	ProfileSummary string            `json:"profile_summary"`
 	MemorySummary  string            `json:"memory_summary"`
-	// TODO: Add derived focus state and app-switch counters for rule-based state machine + explainability.
+	FocusState     string            `json:"focus_state,omitempty"`
+	SwitchCount    int               `json:"switch_count,omitempty"`
 }
 
 type Action struct {
@@ -62,7 +65,8 @@ type Action struct {
 	Confidence float64    `json:"confidence"`
 	Cost       float64    `json:"cost"`
 	RiskLevel  RiskLevel  `json:"risk_level"`
-	// TODO: Add optional explanation/reason field for "why this suggestion" in UI.
+	Reason     string     `json:"reason,omitempty"`
+	State      string     `json:"state,omitempty"`
 }
 
 type DecisionRequest struct {
@@ -156,14 +160,30 @@ type BudgetUsage struct {
 	HourlyHour string  `json:"hourly_hour"`
 }
 
+type FocusStateSnapshot struct {
+	TsMs         int64   `json:"ts_ms"`
+	FocusState   string  `json:"focus_state"`
+	SwitchCount  int     `json:"switch_count"`
+	NoProgressMs int64   `json:"no_progress_ms"`
+	FocusMinutes float64 `json:"focus_minutes"`
+	AppName      string  `json:"app_name,omitempty"`
+	WindowTitle  string  `json:"window_title,omitempty"`
+}
+
+type FocusMetrics struct {
+	WindowMs     int64   `json:"window_ms"`
+	SwitchCount  int     `json:"switch_count"`
+	FocusMinutes float64 `json:"focus_minutes"`
+}
+
 type FocusEvent struct {
-	ID         int64  `json:"id"`
-	TsMs       int64  `json:"ts_ms"`
-	AppName    string `json:"app_name"`
-	BundleID   string `json:"bundle_id,omitempty"`
-	PID        int    `json:"pid,omitempty"`
-	DurationMs int64  `json:"duration_ms"`
-	// TODO: Persist window_title to support "no progress" detection and explanations.
+	ID          int64  `json:"id"`
+	TsMs        int64  `json:"ts_ms"`
+	AppName     string `json:"app_name"`
+	BundleID    string `json:"bundle_id,omitempty"`
+	PID         int    `json:"pid,omitempty"`
+	DurationMs  int64  `json:"duration_ms"`
+	WindowTitle string `json:"window_title,omitempty"`
 }
 
 type FocusCurrent struct {
