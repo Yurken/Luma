@@ -95,6 +95,8 @@ type FeedbackType =
   | "CLOSED"
   | "OPEN_PANEL";
 
+type OrbStyle = "glass" | "infinity" | "pulse" | "orbit";
+
 const modes: Mode[] = ["SILENT", "LIGHT", "ACTIVE"];
 const currentMode = ref<Mode>("LIGHT");
 const userText = ref("");
@@ -146,6 +148,7 @@ const ollamaModels = ref<string[]>([]);
 const modelLoadError = ref("");
 const showModelDropdown = ref(false);
 const orbAutoHide = ref(true);
+const orbStyle = ref<OrbStyle>("glass");
 const windowIdle = ref(false);
 const windowIdleDelay = 4000;
 let windowIdleTimer: number | undefined;
@@ -174,6 +177,25 @@ const autoSuggestTickMs = 60 * 1000;
 const modelOptions = computed(() => {
   return ollamaModels.value.length ? ollamaModels.value : defaultModels;
 });
+
+const orbStyleOptions: Array<{ value: OrbStyle; label: string }> = [
+  { value: "glass", label: "默认" },
+  { value: "infinity", label: "Pure Infinity" },
+  { value: "pulse", label: "Pulse" },
+  { value: "orbit", label: "Orbit" },
+];
+
+const orbStyleModes = [
+  { value: "silent", label: "静默" },
+  { value: "light", label: "轻度" },
+  { value: "active", label: "积极" },
+] as const;
+
+const isOrbStyle = (value: string | null): value is OrbStyle => {
+  return value === "glass" || value === "infinity" || value === "pulse" || value === "orbit";
+};
+
+const getInfinityPreviewId = (mode: string) => `orb-infinity-preview-${mode}`;
 
 const focusMinutesText = computed(() => {
   if (!focusMonitorEnabled.value) {
@@ -915,9 +937,17 @@ const handleUserActivity = () => {
 };
 
 const handleStorageEvent = (event: StorageEvent) => {
-  if (event.key !== "always.orbAutoHide") return;
-  if (event.newValue === null) return;
-  orbAutoHide.value = event.newValue === "true";
+  if (event.key === "always.orbAutoHide") {
+    if (event.newValue === null) return;
+    orbAutoHide.value = event.newValue === "true";
+    return;
+  }
+  if (event.key === "always.orbStyle") {
+    if (event.newValue === null) return;
+    if (isOrbStyle(event.newValue)) {
+      orbStyle.value = event.newValue;
+    }
+  }
 };
 
 watch(
@@ -962,6 +992,10 @@ watch(orbAutoHide, (value) => {
   }
 });
 
+watch(orbStyle, (value) => {
+  window.localStorage.setItem("always.orbStyle", value);
+});
+
 watch(loading, (isLoading) => {
   if (isLoading) {
     wakeWindow();
@@ -982,6 +1016,10 @@ onMounted(() => {
   const storedAutoHide = window.localStorage.getItem("always.orbAutoHide");
   if (storedAutoHide !== null) {
     orbAutoHide.value = storedAutoHide === "true";
+  }
+  const storedOrbStyle = window.localStorage.getItem("always.orbStyle");
+  if (isOrbStyle(storedOrbStyle)) {
+    orbStyle.value = storedOrbStyle;
   }
   const params = new URLSearchParams(window.location.search);
   if (params.get("settings") === "1") {
@@ -1093,6 +1131,73 @@ onBeforeUnmount(() => {
               </button>
               <span class="settings-note">{{ orbAutoHide ? "闲置自动淡出" : "保持常亮" }}</span>
             </div>
+          </div>
+          <div class="setting-row">
+            <label>悬浮球样式</label>
+            <div class="orb-style-grid">
+              <div class="orb-style-header-row">
+                <div></div>
+                <div v-for="mode in orbStyleModes" :key="mode.value" class="orb-style-header">
+                  {{ mode.label }}
+                </div>
+              </div>
+              <button
+                v-for="style in orbStyleOptions"
+                :key="style.value"
+                type="button"
+                class="orb-style-row"
+                :class="{ active: orbStyle === style.value }"
+                :aria-pressed="orbStyle === style.value"
+                @click="orbStyle = style.value"
+              >
+                <span class="orb-style-label">{{ style.label }}</span>
+                <span v-for="mode in orbStyleModes" :key="mode.value" class="orb-style-cell">
+                  <span class="orb-preview" :class="[`orb-${mode.value}`, `orb-style-${style.value}`]">
+                    <span v-if="style.value === 'glass'" class="orb-preview-dot"></span>
+                    <span v-else class="orb-visual">
+                      <svg
+                        v-if="style.value === 'infinity'"
+                        class="orb-infinity"
+                        viewBox="0 0 100 50"
+                        aria-hidden="true"
+                      >
+                        <defs>
+                          <linearGradient
+                            :id="getInfinityPreviewId(mode.value)"
+                            x1="0%"
+                            y1="0%"
+                            x2="100%"
+                            y2="0%"
+                          >
+                            <stop offset="0%" style="stop-color: var(--orb-inf-start);" />
+                            <stop offset="100%" style="stop-color: var(--orb-inf-end);" />
+                          </linearGradient>
+                        </defs>
+                        <path
+                          class="orb-infinity-track"
+                          d="M 50,25 C 38,25 28,12 18,12 C 8,12 8,38 18,38 C 28,38 38,25 50,25 C 62,25 72,38 82,38 C 92,38 92,12 82,12 C 72,12 62,25 50,25 Z"
+                        />
+                        <path
+                          class="orb-infinity-stream"
+                          :style="{ stroke: `url(#${getInfinityPreviewId(mode.value)})` }"
+                          d="M 50,25 C 38,25 28,12 18,12 C 8,12 8,38 18,38 C 28,38 38,25 50,25 C 62,25 72,38 82,38 C 92,38 92,12 82,12 C 72,12 62,25 50,25 Z"
+                        />
+                      </svg>
+                      <span v-else-if="style.value === 'pulse'" class="orb-pulse" aria-hidden="true">
+                        <span class="orb-pulse-ring"></span>
+                        <span class="orb-pulse-ring"></span>
+                        <span class="orb-pulse-core"></span>
+                      </span>
+                      <span v-else class="orb-orbit" aria-hidden="true">
+                        <span class="orb-orbit-sat"></span>
+                        <span class="orb-orbit-center">A</span>
+                      </span>
+                    </span>
+                  </span>
+                </span>
+              </button>
+            </div>
+            <p class="settings-note">样式颜色会随模式变化。</p>
           </div>
           <div class="setting-row">
             <label>悬浮球可见性</label>
@@ -1213,6 +1318,7 @@ onBeforeUnmount(() => {
         :loading="loading"
         :autoHide="orbAutoHide"
         :autoHideDelay="4000"
+        :orbStyle="orbStyle"
         @click="handleOrbClick"
         @dblclick="togglePanel"
       />

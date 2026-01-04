@@ -1,11 +1,12 @@
 <script lang="ts" setup>
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps<{
   mode: "SILENT" | "LIGHT" | "ACTIVE";
   loading: boolean;
   autoHide?: boolean;
   autoHideDelay?: number;
+  orbStyle?: "glass" | "infinity" | "pulse" | "orbit";
 }>();
 
 const emit = defineEmits<{
@@ -20,6 +21,8 @@ const dragMoved = ref(false);
 const dragStart = ref({ x: 0, y: 0, winX: 0, winY: 0 });
 const autoHidden = ref(false);
 let autoHideTimer: number | undefined;
+const resolvedOrbStyle = computed(() => props.orbStyle ?? "glass");
+const infinityGradientId = `orb-infinity-${Math.random().toString(36).slice(2, 9)}`;
 
 const snapThreshold = 24;
 const defaultAutoHideDelay = 4000;
@@ -207,6 +210,10 @@ onBeforeUnmount(() => {
       'orb-active': mode === 'ACTIVE',
       'orb-loading': loading,
       'orb-hidden': autoHidden,
+      'orb-style-glass': resolvedOrbStyle === 'glass',
+      'orb-style-infinity': resolvedOrbStyle === 'infinity',
+      'orb-style-pulse': resolvedOrbStyle === 'pulse',
+      'orb-style-orbit': resolvedOrbStyle === 'orbit',
     }"
     @mousedown="handleMouseDown"
     @dblclick="handleDblClick"
@@ -214,7 +221,35 @@ onBeforeUnmount(() => {
     @mouseleave="scheduleAutoHide"
   >
     <div class="orb-glass"></div>
-    <div class="orb-status-dot" :class="{
+    <div v-if="resolvedOrbStyle !== 'glass'" class="orb-visual">
+      <svg v-if="resolvedOrbStyle === 'infinity'" class="orb-infinity" viewBox="0 0 100 50" aria-hidden="true">
+        <defs>
+          <linearGradient :id="infinityGradientId" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" style="stop-color: var(--orb-inf-start);" />
+            <stop offset="100%" style="stop-color: var(--orb-inf-end);" />
+          </linearGradient>
+        </defs>
+        <path
+          class="orb-infinity-track"
+          d="M 50,25 C 38,25 28,12 18,12 C 8,12 8,38 18,38 C 28,38 38,25 50,25 C 62,25 72,38 82,38 C 92,38 92,12 82,12 C 72,12 62,25 50,25 Z"
+        />
+        <path
+          class="orb-infinity-stream"
+          :style="{ stroke: `url(#${infinityGradientId})` }"
+          d="M 50,25 C 38,25 28,12 18,12 C 8,12 8,38 18,38 C 28,38 38,25 50,25 C 62,25 72,38 82,38 C 92,38 92,12 82,12 C 72,12 62,25 50,25 Z"
+        />
+      </svg>
+      <div v-else-if="resolvedOrbStyle === 'pulse'" class="orb-pulse" aria-hidden="true">
+        <span class="orb-pulse-ring"></span>
+        <span class="orb-pulse-ring"></span>
+        <span class="orb-pulse-core"></span>
+      </div>
+      <div v-else-if="resolvedOrbStyle === 'orbit'" class="orb-orbit" aria-hidden="true">
+        <div class="orb-orbit-sat"></div>
+        <div class="orb-orbit-center">A</div>
+      </div>
+    </div>
+    <div v-else class="orb-status-dot" :class="{
       'status-idle': mode === 'SILENT',
       'status-active': mode === 'LIGHT',
       'status-warn': mode === 'ACTIVE',
@@ -286,19 +321,19 @@ onBeforeUnmount(() => {
 }
 
 .status-idle {
-  background-color: #8E8E93; /* macOS System Gray */
-  box-shadow: 0 0 4px rgba(142, 142, 147, 0.5);
+  background-color: var(--orb-glass-dot, #8E8E93);
+  box-shadow: 0 0 4px var(--orb-glass-dot-glow, rgba(142, 142, 147, 0.5));
 }
 
 .status-active {
-  background-color: #0A84FF; /* macOS System Blue */
-  box-shadow: 0 0 8px rgba(10, 132, 255, 0.6);
+  background-color: var(--orb-glass-dot, #0A84FF);
+  box-shadow: 0 0 8px var(--orb-glass-dot-glow, rgba(10, 132, 255, 0.6));
   animation: pulse 2s ease-in-out infinite;
 }
 
 .status-warn {
-  background-color: #FF9F0A; /* macOS System Orange */
-  box-shadow: 0 0 8px rgba(255, 159, 10, 0.6);
+  background-color: var(--orb-glass-dot, #FF9F0A);
+  box-shadow: 0 0 8px var(--orb-glass-dot-glow, rgba(255, 159, 10, 0.6));
   animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -325,8 +360,8 @@ onBeforeUnmount(() => {
   inset: -2px;
   border-radius: 50%;
   border: 2px solid transparent;
-  border-top-color: rgba(10, 132, 255, 0.6);
-  border-right-color: rgba(10, 132, 255, 0.3);
+  border-top-color: var(--orb-accent-soft, rgba(10, 132, 255, 0.6));
+  border-right-color: var(--orb-accent-softer, rgba(10, 132, 255, 0.3));
   z-index: 0;
   animation: spin 1s linear infinite;
 }
