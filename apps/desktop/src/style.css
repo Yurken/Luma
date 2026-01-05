@@ -682,8 +682,8 @@ textarea:focus {
   height: 52px;
   padding: 0 20px 0 96px;
   width: 100%;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(18, 18, 18, 0.95);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--settings-bg);
   backdrop-filter: blur(12px) saturate(160%);
   -webkit-backdrop-filter: blur(12px) saturate(160%);
   -webkit-app-region: drag;
@@ -695,8 +695,8 @@ textarea:focus {
   gap: 2px;
   padding: 4px;
   border-radius: 100px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.08);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   flex-wrap: nowrap;
@@ -709,7 +709,7 @@ textarea:focus {
   background: transparent;
   font-size: 13px;
   font-weight: 500;
-  color: #999999;
+  color: #6b7280;
   padding: 6px 20px;
   border-radius: 100px;
   cursor: pointer;
@@ -725,7 +725,7 @@ textarea:focus {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.08);
   opacity: 0;
   transform: scale(0.96);
   transition: opacity 0.25s ease, transform 0.25s ease, background-color 0.35s ease, box-shadow 0.35s ease;
@@ -733,7 +733,7 @@ textarea:focus {
 }
 
 .settings-tab:hover {
-  color: #ffffff;
+  color: #111827;
 }
 
 .settings-tab:hover::before {
@@ -742,15 +742,15 @@ textarea:focus {
 }
 
 .settings-tab.active {
-  color: #ffffff;
+  color: #111827;
   font-weight: 600;
 }
 
 .settings-tab.active::before {
   opacity: 1;
   transform: scale(1);
-  background: #333333;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  background: var(--settings-bg);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.12), inset 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 
 .settings-content {
@@ -1137,6 +1137,15 @@ textarea:focus {
 
   .settings-tab.active {
     color: #ffffff;
+  }
+
+  .settings-tab::before {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .settings-tab.active::before {
+    background: #333333;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
 
   .settings {
